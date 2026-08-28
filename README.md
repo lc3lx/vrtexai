@@ -14,6 +14,7 @@ translates rather than an English sentence the customer cannot read.
 |---|---|
 | `backend/` | FastAPI + MongoDB (Beanie). يخدم الـAPI **والواجهة** من نفس العملية. |
 | `frontend/` | HTML/CSS/JS عادي. لا build step، لا npm. |
+| `ocr_worker/` | القارئ: الـOCR والبوابات الثلاث وبناء Excel. يعمل في عملية فرعية. |
 | `ai-service/` | خدمة PaddleOCR-VL على GPU (Docker / Modal) — اختيارية. |
 
 الواجهة ملفات ساكنة يخدمها الباك مباشرة: شيء واحد تشغّله، أصل واحد (origin)،
@@ -40,11 +41,25 @@ cp .env.example .env                            # ثم املأ JWT_SECRET
 على قاعدة بيانات فارغة يُنشأ مسؤول واحد وتُطبع كلمة مروره في سجل الخادم **مرة
 واحدة**، وتُزرع الباقات الثلاث. التقط كلمة المرور من الطرفية.
 
-## اعتماد خارج هذا المستودع
+## القارئ
 
-القارئ نفسه — الـOCR والبوابات الثلاث وبناء ملف Excel — هو كود المنتج المكتبي،
-ولا يُعاد تنفيذه هنا. يشير إليه `WORKER_ROOT` في `.env` وقيمته الافتراضية
-`../../ExcelCleaner/ocr_worker`. بدونه يعمل التطبيق ويقبل الرفع، وتفشل المعالجة.
+`ocr_worker/` هو كود المنتج المكتبي نفسه، لا إعادة تنفيذ له. يشير إليه
+`WORKER_ROOT` وقيمته الافتراضية `../ocr_worker`.
+
+متطلباته على لينكس:
+
+```bash
+apt install -y tesseract-ocr tesseract-ocr-ara libgl1 libglib2.0-0
+backend/.venv/bin/pip install -r ocr_worker/requirements.txt
+```
+
+`paddleocr` **غير مطلوب**: يُستورد داخل الدوال ويتراجع القارئ إلى Tesseract عند
+غيابه، والنموذج البصري يأتي من `AI_PROVIDER` على أي حال. ثبّته
+(`requirements-vl.txt`) فقط إن أردت القراءة المحلية الكاملة — وحينها في بيئة
+افتراضية منفصلة، لأن `numpy` مطلوب بإصدارين متعارضين بين الملفين.
+
+> نسخة `ocr_worker` هنا مرآةٌ لـ`ExcelCleaner/ocr_worker` في مستودع المنتج
+> المكتبي. عند تعديل أحدهما زامِن الآخر.
 
 ## المعالجة
 

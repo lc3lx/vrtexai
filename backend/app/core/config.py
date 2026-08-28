@@ -108,10 +108,12 @@ class Settings:
         self.ai_fallback_local: bool = _flag("AI_FALLBACK_LOCAL", True)
 
         # --- worker -------------------------------------------------------
-        # Path to the existing desktop pipeline. The web app reuses that code
-        # verbatim; it is not reimplemented here.
+        # The reading pipeline. This is the desktop product's code, reused
+        # verbatim rather than reimplemented; a copy ships in this repository so
+        # a fresh clone can process a document without hunting for it. Point
+        # WORKER_ROOT at the desktop tree instead when working on both together.
         self.worker_root: Path = Path(
-            os.environ.get("WORKER_ROOT", "../../ExcelCleaner/ocr_worker")
+            os.environ.get("WORKER_ROOT", "../ocr_worker")
         ).resolve()
         self.worker_python: str = os.environ.get("WORKER_PYTHON", "").strip()
         self.job_concurrency: int = int(os.environ.get("JOB_CONCURRENCY", "1"))

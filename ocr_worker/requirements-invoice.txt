@@ -1,0 +1,20 @@
+# Extra offline packages for the invoice AI path (PaddleOCR PP-Structure, CPU).
+# Installed into the bundled runtime by tools/prepare-offline-runtime.ps1.
+# Do NOT install opencv-contrib / opencv-python (non-headless) here — they
+# collide with opencv-python-headless and break numpy._core.multiarray.
+paddlepaddle==3.0.0
+paddleocr==2.9.1
+imgaug==0.4.0
+shapely
+pyclipper
+lmdb
+tqdm
+cython
+attrdict
+lanms-neo
+rapidfuzz
+python-bidi
+arabic-reshaper
+numpy==1.26.4
+llama-cpp-python==0.3.35
+diskcache>=5.6.1

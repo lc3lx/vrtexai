@@ -1,0 +1,39 @@
+# PaddleOCR-VL environment, installed by tools/prepare-offline-runtime.ps1 into
+# runtime\vl_env as a virtual environment layered over the bundled runtime.
+#
+# It is kept OUT of the main site-packages on purpose. PaddleOCR 3.x is the same
+# import name as the 2.9 install the geometric reader (perceive.py, invoice_ai.py)
+# is built on, and 3.x removed the low-level `.ocr(det=..., rec=...)` entry point
+# that reader depends on. Upgrading in place would break the fallback that has to
+# keep working when the VL weights are absent.
+#
+# A venv rather than `pip --target`: with --target, `modelscope` and
+# `modelscope-hub` claim the same folder and one is left half-extracted, which
+# only fails later at pipeline construction.
+#
+# paddlepaddle IS pinned here and deliberately differs from the 3.0.0 in the base
+# runtime. PaddleOCR-VL's decoder imports `fused_rms_norm_ext` from
+# paddle.incubate, which 3.0.0 does not have, so sharing the base build fails at
+# model load. The venv's own copy shadows it and the geometric path keeps 3.0.0.
+#
+# numpy IS pinned here, and deliberately differs from the base runtime's 1.26.4.
+# The base is held at 1.x because PaddleOCR 2.9 (the geometric reader) needs it,
+# but the wheels in this environment — pandas 3.x above all — are compiled
+# against the numpy 2 ABI. Sharing the base copy makes them fail at import with
+# "numpy._core.multiarray failed to import" — the signature of a numpy-2 build
+# running against numpy 1. It reached a customer that way.
+#
+# The upper bound is paddlex's own (<2.4). OpenCV and Pillow still come from the
+# base install; both were verified working against this numpy.
+numpy>=2.1,<2.4
+paddlepaddle==3.2.2
+paddleocr==3.7.0
+paddlex[ocr]==3.7.2
+
+# Verifies TLS against the Windows certificate store instead of the CA list
+# bundled inside certifi. Without it, the one-time weight download fails on any
+# network that inspects HTTPS (company proxy, HTTPS-scanning antivirus): the
+# re-signed certificate is trusted by Windows but absent from certifi, and every
+# model host is reported unreachable. Measured: all hosts failed with certifi,
+# all returned 200 through the OS store.
+truststore>=0.10
