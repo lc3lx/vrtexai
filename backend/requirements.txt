@@ -1,0 +1,26 @@
+# Excel Clear web backend.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+
+# MongoDB. Beanie is an ODM over motor: it gives typed documents and declared
+# indexes, which is how tenancy filters stay consistent across every query.
+motor==3.6.0
+beanie==1.29.0
+pydantic[email]==2.10.4
+
+# Auth. bcrypt for passwords, PyJWT for sessions.
+passlib[bcrypt]==1.7.4
+bcrypt==4.2.1
+PyJWT==2.10.1
+
+# Calls the GPU vision service.
+httpx==0.28.1
+
+# Verifies TLS against the OS certificate store, so an HTTPS-inspecting
+# corporate proxy does not break outbound calls.
+truststore>=0.10
+
+# Upload validation: real file signatures, not trusted extensions.
+python-magic-bin==0.4.14; sys_platform == "win32"
+python-magic==0.4.27; sys_platform != "win32"

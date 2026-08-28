@@ -1,0 +1,17 @@
+# Excel Clear vision service. Versions match the desktop VL environment exactly
+# so the service and the local fallback read pages identically.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+
+# numpy 2.x is required, not optional: the wheels below are compiled against the
+# numpy 2 ABI, and pairing them with numpy 1.x fails at import with
+# "numpy._core.multiarray failed to import". A customer hit exactly that.
+numpy>=2.1,<2.4
+paddlepaddle==3.2.2
+paddleocr==3.7.0
+paddlex[ocr]==3.7.2
+
+# Verifies TLS against the OS certificate store. Without it the one-time model
+# download fails on any network that inspects HTTPS.
+truststore>=0.10

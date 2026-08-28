@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ڤيرتكس — من الفاتورة إلى Excel موثّق</title>
+<meta name="description" content="ڤيرتكس: شركة رائدة في الذكاء الاصطناعي. نحوّل الفواتير المصوّرة والورقية والملفات إلى جداول Excel نظيفة، وننظّف ملفاتك القائمة — كل رقم له دليل في الصورة.">
+<link rel="icon" href="/static/assets/vertex-mark.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/static/styles.css">
+<link rel="stylesheet" href="/static/landing.css">
+</head>
+<body data-lang="ar" class="lp">
+
+<a class="skip" href="#main" data-t="ld_skip"></a>
+
+<!-- ===================== NAV ===================== -->
+<header class="lnav" id="lnav">
+  <a class="lbrand" href="/">
+    <span class="lmark" aria-hidden="true"></span>
+    <span><b>VERTEX</b><small data-t="ld_brandsub"></small></span>
+  </a>
+  <nav class="llinks">
+    <a href="#services" data-t="ld_n_services"></a>
+    <a href="#how" data-t="ld_n_how"></a>
+    <a href="#pricing" data-t="ld_n_pricing"></a>
+  </nav>
+  <div class="spacer"></div>
+  <div class="toggle"><button onclick="setLang('ar')" id="l-ar-1">عربي</button><button onclick="setLang('en')" id="l-en-1">EN</button></div>
+  <div class="toggle"><button onclick="setTheme('light')" id="t-l-1" aria-label="Light">☀</button><button onclick="setTheme('dark')" id="t-d-1" aria-label="Dark">☾</button></div>
+  <a class="btn btn-s" href="/app" data-t="ld_signin"></a>
+  <button class="btn btn-s btn-p lnav-cta" onclick="openLead('')" data-t="ld_cta"></button>
+</header>
+
+<main id="main">
+
+<!-- ===================== HERO ===================== -->
+<section class="hero">
+  <canvas id="heroCanvas" aria-hidden="true"></canvas>
+  <div class="hero-fallback" id="heroFallback" aria-hidden="true"></div>
+  <div class="hero-in">
+    <p class="ribbon" data-t="ld_eyebrow"></p>
+    <h1 data-t="ld_h1"></h1>
+    <p class="lead" data-t="ld_sub"></p>
+    <div class="hero-cta">
+      <button class="btn btn-p btn-lg" onclick="openLead('')" data-t="ld_cta"></button>
+      <a class="btn btn-lg btn-ghost" href="#how" data-t="ld_how_cta"></a>
+    </div>
+    <ul class="chips">
+      <li data-t="ld_chip1"></li>
+      <li data-t="ld_chip2"></li>
+      <li data-t="ld_chip3"></li>
+    </ul>
+  </div>
+  <div class="scrollhint" aria-hidden="true"><span></span></div>
+</section>
+
+<!-- ===================== PROBLEM → SOLUTION ===================== -->
+<section class="band" id="transform">
+  <div class="wrap two">
+    <div class="reveal">
+      <p class="eyebrow" data-t="ld_t_eyebrow"></p>
+      <h2 data-t="ld_t_h"></h2>
+      <p class="lead" data-t="ld_t_p"></p>
+      <div class="ba">
+        <div class="ba-col"><span class="ba-l" data-t="ld_t_before"></span>
+          <ul><li data-t="ld_t_b1"></li><li data-t="ld_t_b2"></li><li data-t="ld_t_b3"></li></ul></div>
+        <div class="ba-col ok"><span class="ba-l" data-t="ld_t_after"></span>
+          <ul><li data-t="ld_t_a1"></li><li data-t="ld_t_a2"></li><li data-t="ld_t_a3"></li></ul></div>
+      </div>
+    </div>
+    <div class="flowbox reveal">
+      <canvas id="flowCanvas" aria-hidden="true"></canvas>
+      <div class="flow-fallback" id="flowFallback" aria-hidden="true"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== SERVICES ===================== -->
+<section class="band alt" id="services">
+  <div class="wrap">
+    <p class="eyebrow reveal" data-t="ld_s_eyebrow"></p>
+    <h2 class="reveal" data-t="ld_s_h"></h2>
+    <div class="cards3">
+      <article class="tilt reveal">
+        <div class="ic ic-sheet" aria-hidden="true"></div>
+        <h3 data-t="ld_s1_h"></h3><p data-t="ld_s1_p"></p>
+      </article>
+      <article class="tilt reveal">
+        <div class="ic ic-scan" aria-hidden="true"></div>
+        <h3 data-t="ld_s2_h"></h3><p data-t="ld_s2_p"></p>
+      </article>
+      <article class="tilt reveal">
+        <div class="ic ic-stack" aria-hidden="true"></div>
+        <h3 data-t="ld_s3_h"></h3><p data-t="ld_s3_p"></p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== HOW IT WORKS ===================== -->
+<section class="band" id="how">
+  <div class="wrap">
+    <p class="eyebrow reveal" data-t="ld_h_eyebrow"></p>
+    <h2 class="reveal" data-t="ld_h_h"></h2>
+    <p class="lead reveal" data-t="ld_h_p"></p>
+    <ol class="steps">
+      <li class="reveal"><b data-t="ld_st1_h"></b><span data-t="ld_st1_p"></span></li>
+      <li class="reveal"><b data-t="ld_st2_h"></b><span data-t="ld_st2_p"></span></li>
+      <li class="reveal"><b data-t="ld_st3_h"></b><span data-t="ld_st3_p"></span></li>
+      <li class="reveal"><b data-t="ld_st4_h"></b><span data-t="ld_st4_p"></span></li>
+      <li class="reveal"><b data-t="ld_st5_h"></b><span data-t="ld_st5_p"></span></li>
+    </ol>
+  </div>
+</section>
+
+<!-- ===================== TRUST ===================== -->
+<section class="band trust" id="trust">
+  <div class="wrap">
+    <p class="eyebrow reveal" data-t="ld_tr_eyebrow"></p>
+    <h2 class="reveal" data-t="ld_tr_h"></h2>
+    <div class="counters">
+      <div class="reveal"><b class="count mono" data-count="3">0</b><span data-t="ld_c1"></span></div>
+      <div class="reveal"><b class="count mono" data-count="5">0</b><span data-t="ld_c2"></span></div>
+      <div class="reveal"><b class="count mono" data-count="0">0</b><span data-t="ld_c3"></span></div>
+    </div>
+    <div class="cards3">
+      <article class="reveal"><h3 data-t="ld_tr1_h"></h3><p data-t="ld_tr1_p"></p></article>
+      <article class="reveal"><h3 data-t="ld_tr2_h"></h3><p data-t="ld_tr2_p"></p></article>
+      <article class="reveal"><h3 data-t="ld_tr3_h"></h3><p data-t="ld_tr3_p"></p></article>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== PRICING ===================== -->
+<section class="band alt" id="pricing">
+  <div class="wrap">
+    <p class="eyebrow reveal" data-t="ld_p_eyebrow"></p>
+    <h2 class="reveal" data-t="ld_p_h"></h2>
+    <p class="lead reveal" data-t="ld_p_p"></p>
+    <div class="plans" id="planGrid"></div>
+    <p class="note center" data-t="ld_p_note"></p>
+  </div>
+</section>
+
+<!-- ===================== CLOSING CTA ===================== -->
+<section class="band close">
+  <div class="wrap center reveal">
+    <h2 data-t="ld_f_h"></h2>
+    <p class="lead" data-t="ld_f_p"></p>
+    <button class="btn btn-p btn-lg" onclick="openLead('')" data-t="ld_cta"></button>
+  </div>
+</section>
+
+</main>
+
+<footer class="lfoot">
+  <div class="wrap">
+    <div class="lbrand"><span class="lmark" aria-hidden="true"></span>
+      <span><b>VERTEX</b><small data-t="ld_brandsub"></small></span></div>
+    <div class="spacer"></div>
+    <a href="/app" data-t="ld_signin"></a>
+    <small data-t="ld_rights"></small>
+  </div>
+</footer>
+
+<div id="modalHost"></div>
+<script src="/static/i18n.js"></script>
+<script src="/static/landing.js"></script>
+<script type="module" src="/static/scene3d.js"></script>
+</body>
+</html>

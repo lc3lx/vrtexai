@@ -1,0 +1,237 @@
+/* Landing page — extends styles.css, never restates it.
+   The tokens, the buttons, the fields and the modal all come from there; what
+   lives here is the public face: the navy the logo is drawn on, the depth, and
+   the motion. The hero stays navy in both themes on purpose — it is the brand's
+   own ground, not the viewer's, and the extruded mark needs a dark set to read
+   against. Everything below the hero follows the viewer's theme. */
+:root{
+  --navy:#1B2A5B; --navy-deep:#101B3F; --navy-soft:#2A3C77;
+  --navy-ink:#F2F5FD; --navy-ink-2:#AEBBDD;
+  --gold:#C9A227; --gold-2:#E4C767;
+  --lp-wrap:1140px;
+}
+
+.lp{overflow-x:hidden}
+.skip{position:absolute;inset-inline-start:-9999px;top:8px;z-index:200;padding:9px 14px;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);font-size:13px}
+.skip:focus{inset-inline-start:12px}
+
+.wrap{max-width:var(--lp-wrap);margin:0 auto;padding-inline:26px;width:100%}
+.center{text-align:center}
+a.btn{text-decoration:none}
+/* The nav is sticky and in flow, so an anchor jump would land the section
+   underneath it without this. */
+section[id]{scroll-margin-top:84px}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+.lead{color:var(--ink-2);font-size:16.5px;line-height:1.75;max-width:62ch}
+.band{padding:96px 0;position:relative}
+.band.alt{background:var(--surface)}
+.band h2{font-size:clamp(26px,3.4vw,40px);line-height:1.25;margin:10px 0 14px;max-width:20ch}
+.band .eyebrow{color:var(--accent)}
+
+/* ---------------- brand mark ---------------- */
+.lmark{display:block;width:38px;height:20px;flex:none;background:currentColor;
+  -webkit-mask:url(/static/assets/vertex-mark.svg) center/contain no-repeat;
+  mask:url(/static/assets/vertex-mark.svg) center/contain no-repeat}
+.lbrand{display:flex;align-items:center;gap:11px;text-decoration:none;color:inherit}
+.lbrand b{display:block;font-size:15px;font-weight:700;letter-spacing:.14em;line-height:1.2}
+.lbrand small{display:block;font-size:11px;opacity:.72;font-weight:500;letter-spacing:0}
+
+/* ---------------- nav ---------------- */
+.lnav{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:12px;
+  padding:12px max(26px,calc((100vw - var(--lp-wrap))/2));
+  color:var(--navy-ink);background:transparent;transition:background .25s,box-shadow .25s,color .25s}
+.lnav.stuck{background:color-mix(in srgb,var(--surface) 88%,transparent);
+  color:var(--ink);box-shadow:var(--shadow-2);backdrop-filter:blur(14px)}
+.llinks{display:flex;gap:4px}
+.llinks a{padding:7px 12px;border-radius:var(--r-sm);font-size:13.5px;font-weight:500;
+  color:inherit;opacity:.82;text-decoration:none}
+.llinks a:hover{opacity:1;background:color-mix(in srgb,currentColor 12%,transparent)}
+.lnav .toggle{border-color:color-mix(in srgb,currentColor 30%,transparent)}
+.lnav .toggle button{color:inherit;opacity:.75}
+.lnav .toggle button[aria-pressed="true"]{opacity:1}
+.lnav .btn{background:transparent;color:inherit;border-color:color-mix(in srgb,currentColor 34%,transparent)}
+.lnav .btn:hover{background:color-mix(in srgb,currentColor 12%,transparent)}
+.lnav .btn-p{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.lnav.stuck .btn-p:hover{filter:brightness(1.1)}
+
+/* ---------------- hero ---------------- */
+.hero{position:relative;min-height:100svh;display:grid;align-items:center;
+  margin-top:-68px;padding:120px 0 80px;isolation:isolate;
+  background:radial-gradient(120% 90% at 78% 18%,var(--navy-soft) 0%,var(--navy) 42%,var(--navy-deep) 100%);
+  color:var(--navy-ink)}
+/* Painted after the canvas (same negative layer, later in order): a teal wash
+   at the foot of the hero, and on a phone — where the mark sits behind the copy
+   rather than beside it — a scrim that keeps the text the strongest thing here. */
+.hero::after{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;
+  background:radial-gradient(60% 45% at 50% 100%,rgba(12,90,97,.28),transparent 70%)}
+.hero canvas,.hero-fallback{position:absolute;inset:0;width:100%;height:100%;z-index:-1}
+.hero-fallback{display:none;background:url(/static/assets/vertex-mark.svg) no-repeat 76% 46%/min(38vw,420px);
+  opacity:.1}
+.hero.nogl canvas{display:none}
+.hero.nogl .hero-fallback{display:block}
+.hero-in{max-width:var(--lp-wrap);margin:0 auto;padding-inline:26px;width:100%}
+.hero-in>*{max-width:min(640px,100%)}
+.ribbon{display:inline-flex;align-items:center;gap:8px;padding:6px 14px;border-radius:99px;
+  font-size:12.5px;font-weight:600;letter-spacing:.01em;
+  color:var(--gold-2);border:1px solid color-mix(in srgb,var(--gold) 45%,transparent);
+  background:color-mix(in srgb,var(--gold) 12%,transparent)}
+.ribbon::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--gold-2);flex:none}
+.hero h1{font-size:clamp(32px,5.6vw,62px);line-height:1.12;letter-spacing:-.028em;
+  margin:22px 0 18px;font-weight:600}
+.hero .lead{color:var(--navy-ink-2);font-size:clamp(15.5px,1.7vw,19px)}
+.hero-cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:30px}
+.btn-lg{padding:14px 26px;font-size:15px;min-height:52px;border-radius:10px}
+.btn-ghost{background:transparent;color:var(--navy-ink);border-color:rgba(255,255,255,.28)}
+.btn-ghost:hover{background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.5)}
+.chips{list-style:none;display:flex;flex-wrap:wrap;gap:10px;margin:38px 0 0;padding:0}
+.chips li{padding:7px 13px;border-radius:99px;font-size:12.5px;font-weight:500;
+  color:var(--navy-ink-2);background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12)}
+.scrollhint{position:absolute;bottom:26px;inset-inline-start:50%;translate:-50% 0;
+  width:22px;height:34px;border:1.5px solid rgba(255,255,255,.3);border-radius:99px}
+.scrollhint span{position:absolute;top:7px;inset-inline-start:50%;translate:-50% 0;
+  width:3px;height:7px;border-radius:99px;background:rgba(255,255,255,.6);
+  animation:wheel 1.8s ease-in-out infinite}
+@keyframes wheel{0%,100%{opacity:0;transform:translateY(0)}40%{opacity:1}70%{opacity:0;transform:translateY(11px)}}
+
+/* ---------------- problem → solution ---------------- */
+.two{display:grid;grid-template-columns:1.05fr .95fr;gap:56px;align-items:center}
+.ba{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:28px}
+.ba-col{border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;background:var(--surface)}
+.ba-col.ok{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:var(--accent-soft)}
+.ba-l{font-size:11.5px;font-weight:700;letter-spacing:.06em;color:var(--muted)}
+.ba-col.ok .ba-l{color:var(--accent)}
+.ba-col ul{list-style:none;margin:11px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+.ba-col li{font-size:13.5px;color:var(--ink-2);padding-inline-start:18px;position:relative;line-height:1.5}
+.ba-col li::before{content:"";position:absolute;inset-inline-start:0;top:8px;width:7px;height:7px;
+  border-radius:2px;background:var(--line-strong)}
+.ba-col.ok li::before{background:var(--accent)}
+.flowbox{position:relative;aspect-ratio:1/1;border-radius:20px;overflow:hidden;
+  background:linear-gradient(160deg,var(--navy) 0%,var(--navy-deep) 100%);
+  box-shadow:var(--shadow-2)}
+.flowbox canvas,.flow-fallback{position:absolute;inset:0;width:100%;height:100%}
+.flow-fallback{display:none;background:
+  repeating-linear-gradient(0deg,rgba(255,255,255,.09) 0 1px,transparent 1px 34px),
+  repeating-linear-gradient(90deg,rgba(255,255,255,.09) 0 1px,transparent 1px 34px)}
+.flowbox.nogl canvas{display:none}
+.flowbox.nogl .flow-fallback{display:block}
+
+/* ---------------- cards ---------------- */
+.cards3{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px;margin-top:34px}
+.cards3 article{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  padding:26px 24px;box-shadow:var(--shadow-1)}
+.band.alt .cards3 article{background:var(--surface-2)}
+.cards3 h3{font-size:17px;margin-bottom:9px}
+.cards3 p{font-size:14px;color:var(--ink-2);line-height:1.7}
+.tilt{transition:transform .28s cubic-bezier(.2,.7,.3,1),box-shadow .28s;transform-style:preserve-3d;will-change:transform}
+.tilt:hover{box-shadow:var(--shadow-2)}
+.ic{width:44px;height:44px;border-radius:11px;margin-bottom:18px;position:relative;
+  background:var(--accent-soft);color:var(--accent)}
+.ic::before,.ic::after{content:"";position:absolute;background:currentColor;border-radius:1px}
+.ic-sheet::before{inset:13px 12px auto 12px;height:2px;box-shadow:0 6px 0 currentColor,0 12px 0 currentColor}
+.ic-sheet::after{inset:13px auto 13px 20px;width:2px}
+.ic-scan::before{inset:12px 12px auto 12px;height:2px}
+.ic-scan::after{inset:auto 12px 12px 12px;height:2px;box-shadow:0 -9px 0 currentColor}
+.ic-stack::before{inset:12px 14px auto 12px;height:2px;box-shadow:0 5px 0 currentColor}
+.ic-stack::after{inset:auto 10px 12px 16px;height:12px;border:2px solid currentColor;background:none;border-radius:3px}
+
+/* ---------------- steps ---------------- */
+.steps{list-style:none;counter-reset:s;margin:38px 0 0;padding:0;
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:2px}
+.steps li{counter-increment:s;position:relative;padding:26px 20px 22px;
+  background:var(--surface);border:1px solid var(--line)}
+.steps li:first-child{border-start-start-radius:var(--r);border-end-start-radius:var(--r)}
+.steps li:last-child{border-start-end-radius:var(--r);border-end-end-radius:var(--r)}
+.steps li::before{content:counter(s);display:grid;place-items:center;width:28px;height:28px;
+  border-radius:50%;background:var(--accent);color:var(--accent-ink);
+  font-family:var(--mono);font-size:13px;font-weight:600;margin-bottom:14px}
+.steps b{display:block;font-size:14.5px;font-weight:600;margin-bottom:6px}
+.steps span{font-size:13px;color:var(--muted);line-height:1.65}
+
+/* ---------------- trust ---------------- */
+.trust{background:linear-gradient(180deg,var(--navy-deep),var(--navy));color:var(--navy-ink)}
+.trust .eyebrow{color:var(--gold-2)}
+.trust .lead,.trust p{color:var(--navy-ink-2)}
+.trust .cards3 article{background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.12);box-shadow:none}
+.trust .cards3 h3{color:var(--navy-ink)}
+.counters{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:18px;margin-top:34px}
+.counters div{padding:22px 20px;border-radius:var(--r);border:1px solid rgba(255,255,255,.12);
+  background:rgba(255,255,255,.04)}
+.counters b{display:block;font-size:44px;font-weight:600;letter-spacing:-.04em;line-height:1;color:var(--gold-2)}
+.counters span{display:block;font-size:13px;color:var(--navy-ink-2);margin-top:9px;line-height:1.5}
+
+/* ---------------- pricing ---------------- */
+.plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:20px;margin-top:38px;
+  align-items:start}
+.plan{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:30px 26px;
+  box-shadow:var(--shadow-1);display:flex;flex-direction:column;gap:16px;position:relative}
+.plan.hl{border-color:color-mix(in srgb,var(--gold) 60%,transparent);box-shadow:var(--shadow-2);
+  background:linear-gradient(180deg,color-mix(in srgb,var(--gold) 7%,var(--surface)),var(--surface))}
+.plan.hl::before{content:attr(data-badge);position:absolute;top:-11px;inset-inline-start:26px;
+  padding:3px 11px;border-radius:99px;font-size:11px;font-weight:700;
+  background:var(--gold);color:#1a1300}
+.plan-name{font-size:17px;font-weight:600}
+.plan-price{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}
+.plan-price b{font-family:var(--mono);font-size:40px;font-weight:600;letter-spacing:-.04em;line-height:1}
+.plan-price u{text-decoration:none;font-size:13px;color:var(--muted);font-weight:500}
+.plan-limit{font-size:13.5px;font-weight:600;color:var(--accent);
+  background:var(--accent-soft);border-radius:var(--r-sm);padding:9px 12px}
+.plan ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;flex:1}
+.plan li{font-size:13.5px;color:var(--ink-2);padding-inline-start:24px;position:relative;line-height:1.55}
+/* Physical borders, not logical: a tick is the same shape in both directions,
+   and border-inline-end would mirror it into a chevron under RTL. */
+.plan li::before{content:"";position:absolute;inset-inline-start:2px;top:5px;width:11px;height:6px;
+  border:1.8px solid var(--accent);border-top:0;border-right:0;rotate:-45deg}
+.plans .empty{grid-column:1/-1}
+.note.center{margin-top:26px;text-align:center}
+
+/* ---------------- closing + footer ---------------- */
+.close .wrap{display:flex;flex-direction:column;align-items:center;gap:16px}
+.close .lead{max-width:52ch}
+.lfoot{border-top:1px solid var(--line);background:var(--surface);padding:26px 0}
+.lfoot .wrap{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.lfoot a{color:var(--ink-2);font-size:13.5px;text-decoration:none;font-weight:500}
+.lfoot a:hover{color:var(--accent)}
+.lfoot small{font-size:12px;color:var(--muted)}
+
+/* ---------------- lead form ---------------- */
+.leadform{display:flex;flex-direction:column;gap:14px}
+.leadform .hp{position:absolute;inset-inline-start:-9999px;width:1px;height:1px;opacity:0}
+.leadform .field input{direction:ltr;text-align:start}
+.leadform .field input[name="full_name"]{direction:inherit}
+
+/* ---------------- reveal on scroll ---------------- */
+.reveal{opacity:0;transform:translateY(22px);transition:opacity .7s ease,transform .7s cubic-bezier(.2,.7,.3,1)}
+.reveal.in{opacity:1;transform:none}
+
+@media (max-width:900px){
+  .band{padding:70px 0}
+  .two{grid-template-columns:1fr;gap:34px}
+  .flowbox{aspect-ratio:4/3}
+  .llinks{display:none}
+  .steps{grid-template-columns:1fr;gap:10px}
+  .steps li{border-radius:var(--r)!important}
+}
+@media (max-width:720px){
+  .wrap,.hero-in{padding-inline:18px}
+  .lnav{padding:10px 18px;gap:8px}
+  .lnav .btn:not(.btn-p){display:none}
+  .lbrand small{display:none}
+  .hero{min-height:auto;padding:110px 0 64px}
+  .hero::after{background:
+    radial-gradient(60% 45% at 50% 100%,rgba(12,90,97,.28),transparent 70%),
+    linear-gradient(180deg,rgba(16,27,63,.62),rgba(16,27,63,.72))}
+  .hero-cta .btn{width:100%}
+  .scrollhint{display:none}
+  .ba{grid-template-columns:1fr}
+  .counters b{font-size:36px}
+  .lfoot .wrap{flex-direction:column;align-items:flex-start;gap:10px}
+}
+@media (max-width:420px){
+  .lnav .toggle:last-of-type{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  .reveal{opacity:1;transform:none}
+  .tilt{transform:none!important}
+}

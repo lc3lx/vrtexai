@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Excel Clear</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body data-lang="ar">
+
+<!-- ===================== LOGIN ===================== -->
+<div class="login" id="v-login">
+  <div class="loginbox">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div class="mark"><span></span></div>
+      <div><b style="font-size:16px;font-weight:600">Excel Clear</b>
+        <small style="display:block;font-size:11.5px;color:var(--muted)" data-t="tagline"></small></div>
+    </div>
+    <div class="card raise"><div class="card-b" style="display:flex;flex-direction:column;gap:15px">
+      <div><h2 style="font-size:18px" data-t="signin"></h2>
+        <p class="note" style="margin-top:4px" data-t="signinsub"></p></div>
+      <div class="alert a-bad hidden" id="loginError"></div>
+      <form id="loginForm" style="display:flex;flex-direction:column;gap:15px">
+        <div class="field"><label data-t="email"></label>
+          <input type="email" id="email" autocomplete="username" required></div>
+        <div class="field"><label data-t="pw"></label>
+          <input type="password" id="password" autocomplete="current-password" required></div>
+        <button class="btn btn-p btn-w" type="submit" id="loginBtn" data-t="login"></button>
+      </form>
+    </div></div>
+    <div style="display:flex;gap:8px;justify-content:center">
+      <div class="toggle"><button onclick="setLang('ar')" id="l-ar-1">عربي</button><button onclick="setLang('en')" id="l-en-1">EN</button></div>
+      <div class="toggle"><button onclick="setTheme('light')" id="t-l-1" aria-label="Light">☀</button><button onclick="setTheme('dark')" id="t-d-1" aria-label="Dark">☾</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== APP ===================== -->
+<div class="shell hidden" id="v-app" data-role="customer">
+  <nav class="rail">
+    <div class="brand"><div class="mark"><span></span></div>
+      <div><b>Excel Clear</b><small id="brandsub"></small></div></div>
+    <div class="rolechip"><span id="rolechip"></span></div>
+
+    <div id="nav-customer">
+      <button class="navbtn" id="n-dash" onclick="go('dash')"><i class="gi dash"></i><span data-t="nav_dash"></span></button>
+      <button class="navbtn" id="n-up" onclick="go('up')"><i class="gi up"></i><span data-t="nav_up"></span></button>
+      <button class="navbtn" id="n-job" onclick="go('job')"><i class="gi job"></i><span data-t="nav_job"></span></button>
+      <button class="navbtn" id="n-res" onclick="go('res')"><i class="gi res"></i><span data-t="nav_res"></span></button>
+    </div>
+    <div id="nav-admin" class="hidden">
+      <button class="navbtn" id="n-acust" onclick="go('acust')"><i class="gi adm"></i><span data-t="nav_acust"></span></button>
+      <button class="navbtn" id="n-ajobs" onclick="go('ajobs')"><i class="gi job"></i><span data-t="nav_ajobs"></span></button>
+      <button class="navbtn" id="n-ausage" onclick="go('ausage')"><i class="gi dash"></i><span data-t="nav_ausage"></span></button>
+      <button class="navbtn" id="n-aplans" onclick="go('aplans')"><i class="gi plan"></i><span data-t="nav_aplans"></span></button>
+      <button class="navbtn" id="n-aleads" onclick="go('aleads')"><i class="gi lead"></i><span data-t="nav_aleads"></span></button>
+      <button class="navbtn" id="n-asys" onclick="go('asys')"><i class="gi sys"></i><span data-t="nav_asys"></span></button>
+    </div>
+
+    <div class="railfoot"><div class="who">
+      <div class="avatar" id="av"></div>
+      <div><b id="uname"></b><small id="urole"></small></div></div></div>
+  </nav>
+
+  <div class="main">
+    <header class="topbar">
+      <h1 id="pgtitle"></h1><div class="spacer"></div>
+      <div class="toggle"><button onclick="setLang('ar')" id="l-ar-2">عربي</button><button onclick="setLang('en')" id="l-en-2">EN</button></div>
+      <div class="toggle"><button onclick="setTheme('light')" id="t-l-2" aria-label="Light">☀</button><button onclick="setTheme('dark')" id="t-d-2" aria-label="Dark">☾</button></div>
+      <button class="btn btn-s" onclick="signOut()" data-t="signout"></button>
+    </header>
+
+    <!-- customer: dashboard -->
+    <section class="content hidden" id="p-dash">
+      <div class="hello" id="custHello"></div>
+      <div class="grid4" id="custStats"></div>
+      <div class="card">
+        <div class="card-h"><h2 data-t="recent"></h2><div class="spacer"></div>
+          <button class="btn btn-s btn-p" onclick="go('up')" data-t="newjob"></button></div>
+        <div class="tw" id="jobsTable"></div>
+      </div>
+      <p class="note" data-t="scope_c"></p>
+    </section>
+
+    <!-- customer: upload -->
+    <section class="content hidden" id="p-up">
+      <div class="card"><div class="card-b" style="display:flex;flex-direction:column;gap:15px">
+        <div class="alert a-bad hidden" id="upError"></div>
+        <label class="drop" id="drop">
+          <input type="file" id="fileInput" class="hidden"
+                 accept=".png,.jpg,.jpeg,.webp,.tif,.tiff,.bmp,.pdf">
+          <div class="ic"></div>
+          <b data-t="drop"></b><small data-t="dropsub"></small>
+        </label>
+        <div id="pickedBox" class="hidden">
+          <div class="rowline"><span data-t="u_file"></span><span class="mono" id="pickedName"></span></div>
+          <div class="rowline"><span data-t="u_size"></span><span class="mono" id="pickedSize"></span></div>
+        </div>
+        <button class="btn btn-p btn-w" id="startBtn" disabled data-t="start"></button>
+        <p class="note" data-t="u_note"></p>
+      </div></div>
+    </section>
+
+    <!-- customer: processing -->
+    <section class="content hidden" id="p-job"><div id="jobView"></div></section>
+
+    <!-- customer: result -->
+    <section class="content hidden" id="p-res"><div id="resView"></div></section>
+
+    <!-- admin -->
+    <section class="content hidden" id="p-acust">
+      <div class="grid4" id="admStats"></div>
+      <div class="card">
+        <div class="card-h"><h2 data-t="a_tbl"></h2><div class="spacer"></div>
+          <button class="btn btn-s btn-p" onclick="openNewCustomer()" data-t="a_new"></button></div>
+        <div class="tw" id="custTable"></div>
+      </div>
+      <p class="note" data-t="a_note"></p>
+    </section>
+    <section class="content hidden" id="p-ajobs">
+      <div class="card"><div class="card-h"><h2 data-t="aj_tbl"></h2></div>
+        <div class="tw" id="admJobsTable"></div></div>
+    </section>
+    <section class="content hidden" id="p-ausage">
+      <div class="card"><div class="card-h"><h2 data-t="au_tbl"></h2></div>
+        <div class="card-b" id="usageBox"></div></div>
+    </section>
+    <section class="content hidden" id="p-aplans">
+      <div class="card">
+        <div class="card-h"><h2 data-t="ap_tbl"></h2><div class="spacer"></div>
+          <button class="btn btn-s btn-p" onclick="openPlan(null)" data-t="ap_new"></button></div>
+        <div class="tw" id="planTable"></div>
+      </div>
+      <p class="note" data-t="ap_note"></p>
+    </section>
+    <section class="content hidden" id="p-aleads">
+      <div class="card">
+        <div class="card-h"><h2 data-t="al_tbl"></h2><div class="spacer"></div>
+          <select id="leadFilter" onchange="loadLeads()"></select></div>
+        <div class="tw" id="leadTable"></div>
+      </div>
+      <p class="note" data-t="al_note"></p>
+    </section>
+    <section class="content hidden" id="p-asys">
+      <div class="card"><div class="card-h"><h2 data-t="as_tbl"></h2></div>
+        <div class="card-b" id="sysBox"></div></div>
+    </section>
+
+    <nav class="tabs" id="tabs-customer">
+      <button class="tab" id="m-dash" onclick="go('dash')"><i class="gi dash"></i><span data-t="m_dash"></span></button>
+      <button class="tab" id="m-up" onclick="go('up')"><i class="gi up"></i><span data-t="m_up"></span></button>
+      <button class="tab" id="m-job" onclick="go('job')"><i class="gi job"></i><span data-t="m_job"></span></button>
+      <button class="tab" id="m-res" onclick="go('res')"><i class="gi res"></i><span data-t="m_res"></span></button>
+    </nav>
+    <nav class="tabs hidden" id="tabs-admin">
+      <button class="tab" id="m-acust" onclick="go('acust')"><i class="gi adm"></i><span data-t="m_acust"></span></button>
+      <button class="tab" id="m-ajobs" onclick="go('ajobs')"><i class="gi job"></i><span data-t="m_ajobs"></span></button>
+      <button class="tab" id="m-ausage" onclick="go('ausage')"><i class="gi dash"></i><span data-t="m_ausage"></span></button>
+      <button class="tab" id="m-aplans" onclick="go('aplans')"><i class="gi plan"></i><span data-t="m_aplans"></span></button>
+      <button class="tab" id="m-aleads" onclick="go('aleads')"><i class="gi lead"></i><span data-t="m_aleads"></span></button>
+      <button class="tab" id="m-asys" onclick="go('asys')"><i class="gi sys"></i><span data-t="m_asys"></span></button>
+    </nav>
+  </div>
+</div>
+
+<div id="modalHost"></div>
+<script src="/static/i18n.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

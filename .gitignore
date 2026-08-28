@@ -1,0 +1,31 @@
+# Secrets. .env holds JWT_SECRET and the OpenRouter key; .env.example is the
+# one that belongs in the repository.
+.env
+.env.local
+*.pem
+*.key
+
+# Customer documents and the workbooks built from them. Never versioned: these
+# are other people's invoices.
+storage/
+backend/storage/
+
+# Python environments and bytecode
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs and scratch output
+*.log
+.cache/

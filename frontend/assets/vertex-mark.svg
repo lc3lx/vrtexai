@@ -1,0 +1,14 @@
+<!--
+  The Vertex "VA" monogram, hand-traced as two closed contours: a bold V whose
+  tip is cut by a scoop, and a lambda-form A whose left leg stops at that scoop.
+  The same two contours are rebuilt point-for-point in scene3d.js and extruded,
+  so the flat mark and the 3D one are the same drawing rather than two guesses.
+  currentColor, so one file serves the navy header, the light footer and the
+  no-WebGL fallback without a second copy.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 270" fill="currentColor"
+     role="img" aria-label="Vertex">
+  <path d="M 0 0 L 148 0 L 272 206 C 264 238 238 260 204 258 C 176 256 156 246 148 226 Z"/>
+  <path d="M 288 192 L 354 26 C 362 4 380 0 391 20 L 512 262 L 398 262
+           C 366 262 342 238 332 202 C 326 182 308 180 288 192 Z"/>
+</svg>
