@@ -71,10 +71,16 @@ class WorkbookCase(unittest.TestCase):
         self.book = load_workbook(self.destination)
         self.addCleanup(self.book.close)
         # The workbook opens on a review summary, so the page sheets start at
-        # index 1. Named here rather than indexed blindly, so a future sheet
-        # added at the front does not silently point every assertion at it.
-        self.summary = self.book["المراجعة"]
-        self.pages = [s for s in self.book.worksheets if s.title != "المراجعة"]
+        # index 1. Found by the name the builder gives it in this document's own
+        # language — an English document's front sheet is called "Review" — and
+        # asserted to be first, so a future sheet added at the front does not
+        # silently point every assertion at it.
+        expected = excel_builder.words_for(
+            str((list(documents) or [document()])[0].get("direction") or "ltr")
+        )("review")
+        self.summary = self.book.worksheets[0]
+        self.assertEqual(self.summary.title, expected)
+        self.pages = self.book.worksheets[1:]
         self.sheet = self.pages[0]
         return self.sheet
 
@@ -376,7 +382,49 @@ class StructureTests(WorkbookCase):
     def test_the_workbook_opens_on_the_review_summary(self):
         # What a reviewer needs first is "is any of this wrong", not row 41.
         self.build()
-        self.assertEqual(self.book.worksheets[0].title, "المراجعة")
+        self.assertIs(self.book.worksheets[0], self.summary)
+
+    def test_an_english_document_is_written_in_english(self):
+        """No Arabic anywhere in an English invoice's workbook.
+
+        The complaint this guards against is a real one: an English invoice came
+        back with Arabic headings over its figures, which stops the sheet being
+        a transcription of the page it came from.
+        """
+        # Every scrap of content is English here, so anything Arabic left in the
+        # workbook can only have come from the builder's own vocabulary.
+        self.build(document(
+            direction="ltr",
+            title="TAX INVOICE",
+            columns=["Item", "Qty", "Unit Price", "Amount"],
+            column_roles=["description", "qty", "unit_price", "line_total"],
+            items=[{"description": "Steel bracket", "qty": 2,
+                    "unit_price": 15.5, "line_total": 31.0}],
+            header={"supplier": "Northwind Ltd", "invoice_number": "INV-9"},
+            totals={"subtotal": 31.0, "grand_total": 31.0},
+            notes=["Payment due within 30 days."],
+        ))
+        for sheet in self.book.worksheets:
+            text = " ".join(
+                str(cell.value) for row in sheet.iter_rows() for cell in row
+                if isinstance(cell.value, str)
+            )
+            found = excel_builder.ARABIC.findall(text)
+            self.assertFalse(found, f"Arabic in sheet {sheet.title!r}: {found[:8]}")
+        self.assertFalse(self.sheet.sheet_view.rightToLeft)
+        self.assertFalse(self.summary.sheet_view.rightToLeft)
+        self.assertEqual(self.summary.title, "Review")
+
+    def test_an_arabic_document_is_written_in_arabic_and_reads_right_to_left(self):
+        self.build(document(direction="rtl"))
+        self.assertTrue(self.sheet.sheet_view.rightToLeft)
+        self.assertTrue(self.summary.sheet_view.rightToLeft)
+        self.assertEqual(self.summary.title, "المراجعة")
+        text = " ".join(
+            str(cell.value) for row in self.summary.iter_rows() for cell in row
+            if isinstance(cell.value, str)
+        )
+        self.assertIn("ملخّص المراجعة", text)
 
     def test_the_summary_lists_every_flagged_value_with_a_reason(self):
         self.build(document(items=[{

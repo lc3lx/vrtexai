@@ -36,34 +36,103 @@ TITLE_TEXT = "1F4E79"
 MONEY_ROLES = {"unit_price", "line_total", "discount", "tax"}
 QTY_ROLES = {"qty"}
 
-_HEADER_LABELS = {
-    "supplier": "المورد",
-    "client_name": "العميل",
-    "invoice_number": "رقم الفاتورة",
-    "invoice_date": "تاريخ الفاتورة",
-    "due_date": "تاريخ الاستحقاق",
-    "tax_number": "الرقم الضريبي",
-    "payment_terms": "شروط الدفع",
+# Every word this builder puts in a cell, in both languages: (Arabic, English).
+#
+# The document chooses, not the product. An English invoice that comes back with
+# "الإجمالي" over its figures has been translated by the tool rather than
+# transcribed, and the sheet no longer matches the paper it came from — which is
+# the one thing an accounts office checks it against. The same decision that
+# sets the sheet's direction picks the column here, so a page is never
+# right-to-left with English headings or the other way round.
+_TEXT: dict[str, tuple[str, str]] = {
+    # header fields
+    "supplier": ("المورد", "Supplier"),
+    "client_name": ("العميل", "Customer"),
+    "invoice_number": ("رقم الفاتورة", "Invoice no."),
+    "invoice_date": ("تاريخ الفاتورة", "Invoice date"),
+    "due_date": ("تاريخ الاستحقاق", "Due date"),
+    "tax_number": ("الرقم الضريبي", "Tax number"),
+    "payment_terms": ("شروط الدفع", "Payment terms"),
+    # item columns
+    "description": ("الوصف", "Description"),
+    "sku": ("رمز الصنف", "SKU"),
+    "qty": ("الكمية", "Qty"),
+    "unit_price": ("سعر الوحدة", "Unit price"),
+    "line_total": ("الإجمالي", "Line total"),
+    "discount": ("الخصم", "Discount"),
+    "tax": ("الضريبة", "Tax"),
+    "unit": ("الوحدة", "Unit"),
+    "date": ("التاريخ", "Date"),
+    # totals
+    "subtotal": ("المجموع الفرعي", "Subtotal"),
+    "tax_amount": ("الضريبة", "Tax"),
+    "tax_rate": ("نسبة الضريبة", "Tax rate"),
+    "grand_total": ("الإجمالي النهائي", "Total"),
+    # page furniture
+    "page_n": ("صفحة", "Page"),
+    "read_value": ("القيمة المقروءة من الصورة", "Value read from the image"),
+    "other_text": ("ملاحظات ونصوص أخرى في الصفحة", "Notes and other text on the page"),
+    "no_page_data": (
+        "لم يتم استخراج أي بيانات من هذه الصفحة.",
+        "No data could be extracted from this page.",
+    ),
+    "no_file_data": (
+        "لم يتم استخراج أي بيانات من هذا الملف.",
+        "No data could be extracted from this file.",
+    ),
+    # review sheet
+    "review": ("المراجعة", "Review"),
+    "review_title": ("ملخّص المراجعة", "Review summary"),
+    "source": ("المصدر", "Source"),
+    "file": ("الملف", "File"),
+    "pages": ("الصفحات", "Pages"),
+    "items_extracted": ("البنود المستخرجة", "Items extracted"),
+    "what_checked": ("ما جرى التحقق منه", "What was checked"),
+    "shape": ("الشكل", "Shape"),
+    "shape_note": (
+        "الأرقام أرقام والأدوار من مجموعة معروفة",
+        "Numbers are numbers, and every column role comes from a known set",
+    ),
+    "arithmetic": ("الحساب", "Arithmetic"),
+    "arithmetic_note": (
+        "الكمية × السعر = الإجمالي، ومجموع البنود = المجموع الفرعي",
+        "Quantity x price = line total, and the item sum = the subtotal",
+    ),
+    "pixels": ("البكسلات", "Pixels"),
+    "pixels_note": (
+        "كل رقم له ما يقابله في قراءة مستقلة للصورة",
+        "Every figure has a match in an independent reading of the image",
+    ),
+    "needs_review": ("يحتاج مراجعة", "Needs review"),
+    "all_clean": (
+        "لا شيء. كل قيمة لها دليل في الصورة وحسابها صحيح.",
+        "Nothing. Every value has evidence in the image and its arithmetic checks out.",
+    ),
+    "col_sheet": ("الورقة", "Sheet"),
+    "col_cell": ("الخلية", "Cell"),
+    "col_value": ("القيمة", "Value"),
+    "col_reason": ("السبب", "Reason"),
+    "needs_confirming": ("تحتاج تأكيداً", "Needs confirming"),
 }
-_ROLE_LABELS = {
-    "description": "الوصف",
-    "sku": "رمز الصنف",
-    "qty": "الكمية",
-    "unit_price": "سعر الوحدة",
-    "line_total": "الإجمالي",
-    "discount": "الخصم",
-    "tax": "الضريبة",
-    "unit": "الوحدة",
-    "date": "التاريخ",
-}
-_TOTAL_LABELS = {
-    "subtotal": "المجموع الفرعي",
-    "discount": "الخصم",
-    "tax_amount": "الضريبة",
-    "tax_rate": "نسبة الضريبة",
-    "grand_total": "الإجمالي النهائي",
-}
+
 _TOTAL_ORDER = ("subtotal", "discount", "tax_amount", "grand_total")
+
+
+def words_for(direction: str):
+    """A lookup that answers in the language the document is written in."""
+    index = 0 if str(direction or "ltr").casefold() == "rtl" else 1
+
+    def say(key: str, default: str | None = None) -> str:
+        pair = _TEXT.get(key)
+        if pair is None:
+            return default if default is not None else key
+        return pair[index]
+
+    return say
+
+
+def document_words(document: dict[str, Any]):
+    return words_for(str(document.get("direction") or "ltr"))
 
 _CURRENCY_SYMBOLS = {
     "SAR": "ر.س", "AED": "د.إ", "QAR": "ر.ق", "KWD": "د.ك", "EGP": "ج.م",
@@ -71,12 +140,23 @@ _CURRENCY_SYMBOLS = {
 }
 
 
+# Currencies whose symbol is written before the amount. $1,200.00 is right and
+# 1,200.00 $ is not; ر.س goes after its number and $ does not, so the symbol's
+# side is a property of the currency rather than a house style.
+_SYMBOL_LEADS = {"USD", "EUR", "GBP", "CAD", "AUD", "CHF", "JPY", "CNY", "INR"}
+
+
 def money_format(currency: str) -> str:
     """An Excel number format carrying the document's own currency."""
-    symbol = _CURRENCY_SYMBOLS.get((currency or "").strip().upper(), (currency or "").strip())
+    code = (currency or "").strip().upper()
+    symbol = _CURRENCY_SYMBOLS.get(code, (currency or "").strip())
     # Quotes and semicolons would end the literal and corrupt the format string.
     symbol = re.sub(r'["\\;\[\]]', "", symbol)[:6]
-    return f'#,##0.00" {symbol}"' if symbol else "#,##0.00"
+    if not symbol:
+        return "#,##0.00"
+    if code in _SYMBOL_LEADS:
+        return f'"{symbol}"#,##0.00'
+    return f'#,##0.00" {symbol}"'
 
 
 def _column_letter(index: int) -> str:
@@ -95,6 +175,7 @@ def plan_columns(document: dict[str, Any]) -> list[tuple[str, str, str]]:
     """
     from ai_extract import ROLES
 
+    say = document_words(document)
     headings: dict[str, str] = {}
     order: list[str] = []
     roles = document.get("column_roles") or []
@@ -102,7 +183,9 @@ def plan_columns(document: dict[str, Any]) -> list[tuple[str, str, str]]:
     for index, role in enumerate(roles):
         if role in ROLES and role != "other" and role not in headings:
             heading = str(columns[index]).strip() if index < len(columns) else ""
-            headings[role] = heading or _ROLE_LABELS.get(role, role)
+            # The heading actually printed on the page wins over our own word for
+            # it. Falling back to a translation is the last resort, not the plan.
+            headings[role] = heading or say(role, role)
             order.append(role)
 
     fields: list[tuple[str, str, str]] = []
@@ -114,7 +197,7 @@ def plan_columns(document: dict[str, Any]) -> list[tuple[str, str, str]]:
             return
         seen.add(key)
         role = key if key in ROLES else "other"
-        heading = headings.get(role) or _ROLE_LABELS.get(role) or field
+        heading = headings.get(role) or say(role, field)
         fields.append((field, heading, role))
 
     # Model-declared order first, so the sheet mirrors the printed table.
@@ -200,8 +283,12 @@ def _write_page(
     currency = money_format(str(document.get("currency") or ""))
     quantity_format = "#,##0.###"
 
-    if str(document.get("direction") or "ltr") == "rtl":
-        sheet.sheet_view.rightToLeft = True
+    # One decision, taken once: which way the page reads. It turns the whole
+    # sheet around so column A sits where the document's first column sits, and
+    # it picks the language of every word this builder adds.
+    rtl = str(document.get("direction") or "ltr").casefold() == "rtl"
+    sheet.sheet_view.rightToLeft = rtl
+    say = document_words(document)
 
     widths: dict[int, int] = {}
     review_items: list[dict[str, Any]] = []
@@ -239,7 +326,7 @@ def _write_page(
     _track(widths, 1, title)
     row += 1
 
-    subtitle = f"{source.name} — صفحة {document.get('page', 1)}"
+    subtitle = f"{source.name} — {say('page_n')} {document.get('page', 1)}"
     cell = sheet.cell(row, 1, subtitle)
     cell.font = Font(name=FONT_NAME, size=9, italic=True, color="7F7F7F")
     if width > 1:
@@ -250,7 +337,7 @@ def _write_page(
     header = document.get("header") or {}
     if header:
         for key, value in header.items():
-            label = _HEADER_LABELS.get(str(key).casefold(), str(key))
+            label = say(str(key).casefold(), str(key))
             label_cell = sheet.cell(row, 1, label)
             _style_cell(label_cell, border=thin, bold=True)
             label_cell.fill = label_fill
@@ -306,7 +393,7 @@ def _write_page(
                         is_formula = True
                         if value is not None:
                             cell.comment = Comment(
-                                f"القيمة المقروءة من الصورة: {value:,.2f}", "Vertex"
+                                f"{say('read_value')}: {value:,.2f}", "Vertex"
                             )
                         _track(widths, index, f"{(value or qty * price):,.2f}")
                     else:
@@ -341,7 +428,7 @@ def _write_page(
                         flag(index, heading, value, str(note or ""))
                     elif qty_column:
                         # Redirect the fix to the quantity, which is a literal.
-                        flag(qty_column, _ROLE_LABELS["qty"], item.get("qty"), str(note or ""))
+                        flag(qty_column, say("qty"), item.get("qty"), str(note or ""))
             records += 1
             if painted:
                 flagged += 1
@@ -369,11 +456,14 @@ def _write_page(
             if key not in totals and not (key == "subtotal" and first_item_row):
                 continue
             value = totals.get(key)
-            label_cell = sheet.cell(row, label_column, _TOTAL_LABELS.get(key, key))
+            label_cell = sheet.cell(row, label_column, say(key, key))
             is_grand = key == "grand_total"
             _style_cell(label_cell, border=thin, bold=True)
             label_cell.fill = label_fill
-            label_cell.alignment = Alignment(horizontal="right")
+            # Pushed up against its own amount. The label sits one column before
+            # the value, and a right-to-left sheet mirrors the columns — so the
+            # side that puts the two together flips with the sheet.
+            label_cell.alignment = Alignment(horizontal="left" if rtl else "right")
             _track(widths, label_column, label_cell.value)
 
             formula = None
@@ -398,7 +488,7 @@ def _write_page(
             value_cell.alignment = Alignment(horizontal="right")
             if formula is not None and value is not None:
                 value_cell.comment = Comment(
-                    f"القيمة المقروءة من الصورة: {value:,.2f}", "Vertex"
+                    f"{say('read_value')}: {value:,.2f}", "Vertex"
                 )
             _track(widths, value_column, f"{value or 0:,.2f}")
             if is_grand:
@@ -422,7 +512,7 @@ def _write_page(
     # ---- notes -----------------------------------------------------------
     notes_list = [str(note) for note in (document.get("notes") or []) if str(note).strip()]
     if notes_list:
-        cell = sheet.cell(row, 1, "ملاحظات ونصوص أخرى في الصفحة")
+        cell = sheet.cell(row, 1, say("other_text"))
         cell.font = Font(name=FONT_NAME, size=11, bold=True, color=BAND_TEXT)
         cell.fill = band
         cell.border = thin
@@ -439,7 +529,7 @@ def _write_page(
             row += 1
 
     if row == 1:
-        sheet.cell(1, 1, "لم يتم استخراج أي بيانات من هذه الصفحة.")
+        sheet.cell(1, 1, say("no_page_data"))
     for column, size in widths.items():
         sheet.column_dimensions[_column_letter(column)].width = max(10, size)
 
@@ -478,10 +568,16 @@ def _write_summary(book, styles, source: Path, documents, records: int,
     """
     from openpyxl.styles import Alignment, Font, PatternFill
 
-    sheet = book.create_sheet(title="المراجعة", index=0)
+    # The front sheet follows the documents behind it. A majority, not "any one
+    # of them": a batch of English invoices with a single Arabic page in it is
+    # still an English workbook to the person opening it.
+    rtl_pages = sum(1 for d in documents if str(d.get("direction") or "") == "rtl")
+    rtl = rtl_pages * 2 > len(documents) if documents else False
+    say = words_for("rtl" if rtl else "ltr")
+
+    sheet = book.create_sheet(title=say("review"), index=0)
     thin, band, label_fill = styles["thin"], styles["band"], styles["label_fill"]
-    if any(str(d.get("direction") or "") == "rtl" for d in documents):
-        sheet.sheet_view.rightToLeft = True
+    sheet.sheet_view.rightToLeft = rtl
     sheet.sheet_view.showGridLines = False
 
     def band_row(row: int, text: str, span: int = 4) -> int:
@@ -505,33 +601,34 @@ def _write_summary(book, styles, source: Path, documents, records: int,
         sheet.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
         return row + 1
 
-    title = sheet.cell(1, 1, "ملخّص المراجعة")
+    title = sheet.cell(1, 1, say("review_title"))
     title.font = Font(name=FONT_NAME, size=16, bold=True, color=TITLE_TEXT)
     sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=4)
     row = 3
 
-    row = band_row(row, "المصدر")
-    row = pair(row, "الملف", source.name)
-    row = pair(row, "الصفحات", len(documents))
-    row = pair(row, "البنود المستخرجة", records)
+    row = band_row(row, say("source"))
+    row = pair(row, say("file"), source.name)
+    row = pair(row, say("pages"), len(documents))
+    row = pair(row, say("items_extracted"), records)
     row += 1
 
-    row = band_row(row, "ما جرى التحقق منه")
+    row = band_row(row, say("what_checked"))
     # Named so the reviewer knows what the absence of a flag actually means.
-    row = pair(row, "الشكل", "الأرقام أرقام والأدوار من مجموعة معروفة")
-    row = pair(row, "الحساب", "الكمية × السعر = الإجمالي، ومجموع البنود = المجموع الفرعي")
-    row = pair(row, "البكسلات", "كل رقم له ما يقابله في قراءة مستقلة للصورة")
+    row = pair(row, say("shape"), say("shape_note"))
+    row = pair(row, say("arithmetic"), say("arithmetic_note"))
+    row = pair(row, say("pixels"), say("pixels_note"))
     row += 1
 
-    row = band_row(row, "يحتاج مراجعة")
+    row = band_row(row, say("needs_review"))
     if not review_items:
-        cell = sheet.cell(row, 1, "لا شيء. كل قيمة لها دليل في الصورة وحسابها صحيح.")
+        cell = sheet.cell(row, 1, say("all_clean"))
         _style_cell(cell, border=thin)
         cell.alignment = _text_alignment(cell.value)
         sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=4)
         row += 1
     else:
-        for index, heading in enumerate(("الورقة", "الخلية", "القيمة", "السبب"), start=1):
+        for index, heading in enumerate(
+                (say("col_sheet"), say("col_cell"), say("col_value"), say("col_reason")), start=1):
             cell = sheet.cell(row, index, heading)
             cell.font = Font(name=FONT_NAME, size=11, bold=True, color=BAND_TEXT)
             cell.fill = band
@@ -544,7 +641,7 @@ def _write_summary(book, styles, source: Path, documents, records: int,
                 # "suggestion" is the key `flag` writes; it carries the reason
                 # the gate objected, which is the only column a reviewer reads.
                 (item.get("sheet") or "", where, item.get("value"),
-                 item.get("suggestion") or "تحتاج تأكيداً"), start=1
+                 item.get("suggestion") or say("needs_confirming")), start=1
             ):
                 cell = sheet.cell(row, index, value)
                 _style_cell(cell, border=thin)
@@ -581,6 +678,8 @@ def write_ai_workbook(
     review_items: list[dict[str, Any]] = []
     taken: set[str] = set()
     first_headings: list[str] = []
+    rtl_pages = sum(1 for d in documents if str(d.get("direction") or "") == "rtl")
+    dominant_direction = "rtl" if documents and rtl_pages * 2 > len(documents) else "ltr"
 
     for index, document in enumerate(documents, start=1):
         sheet = book.create_sheet(title=_sheet_title(source, index, len(documents), taken))
@@ -595,7 +694,7 @@ def write_ai_workbook(
 
     if not book.worksheets:
         sheet = book.create_sheet(title="Extracted")
-        sheet.cell(1, 1, "لم يتم استخراج أي بيانات من هذا الملف.")
+        sheet.cell(1, 1, words_for(dominant_direction)("no_file_data"))
 
     _write_summary(book, styles, source, list(documents), records, review_items)
     book.active = 0
