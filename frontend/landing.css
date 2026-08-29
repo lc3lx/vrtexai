@@ -216,8 +216,11 @@ html{scroll-behavior:smooth}
 }
 @media (max-width:720px){
   .wrap,.hero-in{padding-inline:18px}
-  .lnav{padding:10px 18px;gap:8px}
-  .lnav .btn:not(.btn-p){display:none}
+  .lnav{padding:10px 18px;gap:6px}
+  /* The theme toggle goes first — the language toggle and sign-in stay, since a
+     returning customer needs a visible way back into their account. */
+  .lnav .toggle:last-of-type{display:none}
+  .lnav .btn-s:not(.btn-p){padding:6px 9px;font-size:12px}
   .lbrand small{display:none}
   .hero{min-height:auto;padding:110px 0 64px}
   .hero::after{background:
@@ -229,8 +232,13 @@ html{scroll-behavior:smooth}
   .counters b{font-size:36px}
   .lfoot .wrap{flex-direction:column;align-items:flex-start;gap:10px}
 }
-@media (max-width:420px){
-  .lnav .toggle:last-of-type{display:none}
+@media (max-width:360px){
+  /* Four controls plus the wordmark do not fit a 320px phone. The mark alone
+     still identifies the brand next to two buttons that both lead somewhere a
+     tap can't get lost. */
+  .lnav .lbrand b{display:none}
+  .lnav{gap:5px}
+  .lnav .btn-s:not(.btn-p){padding:6px 7px}
 }
 @media (prefers-reduced-motion:reduce){
   .reveal{opacity:1;transform:none}
