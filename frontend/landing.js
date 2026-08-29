@@ -65,7 +65,7 @@ Object.assign(T, {
   ld_tr_h:["الدقة ليست وعداً — إنها إجراء.","Accuracy is a procedure here, not a promise."],
   ld_c1:["بوابات تحقق مستقلة على كل مستند","independent verification gates on every document"],
   ld_c2:["مراحل معلنة تراها وهي تجري","stages you watch as they actually run"],
-  ld_c3:["قيمة تُحذف بصمت — تُعلَّم ولا تُحذف أبداً","values silently dropped — flagged, never deleted"],
+  ld_c3:["قيمة تُحذف من غير تعليم","values deleted without being flagged"],
   ld_tr1_h:["دليل لكل رقم","Evidence for every number"],
   ld_tr1_p:["لا تُقبل قيمة لمجرّد أن النموذج قالها. تُقابَل بقارئ مستقل وبإعادة حساب، وما لم يطابق يصلك معلَّماً بسببه.",
             "No value is accepted just because the model said it. It is matched against an independent reader and recomputed; whatever fails reaches you flagged, with its reason."],
