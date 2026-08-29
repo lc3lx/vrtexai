@@ -25,7 +25,9 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import get_settings
-from app.models.entities import FlaggedValue, Job, JobStatus, Stage, StageTiming, User
+from app.models.entities import (
+    FlaggedValue, Job, JobKind, JobStatus, Stage, StageTiming, User,
+)
 from app.services.runner import PROGRESS as PROGRESS_MARKER
 from app.services.storage import result_path
 
@@ -156,10 +158,11 @@ async def run_job(job_id: str) -> None:
     if job is None or job.status != JobStatus.QUEUED:
         return
 
+    cleaning = job.kind == JobKind.CLEAN
     started_at = datetime.now(timezone.utc)
     job.status = JobStatus.PROCESSING
     job.started_at = started_at
-    job.stage = Stage.EVIDENCE_OCR
+    job.stage = Stage.CLEAN if cleaning else Stage.EVIDENCE_OCR
     job.stage_started_at = started_at
     job.pages_done = 0
     # The upload is finished the moment the job exists — the file is already on
@@ -170,6 +173,7 @@ async def run_job(job_id: str) -> None:
 
     settings = get_settings()
     payload = {
+        "kind": job.kind.value,
         "source": str(settings.storage_path / "uploads" / job.customer_id / job.stored_name),
         "result_dir": str(result_path(job.customer_id, str(job.id))),
         "pages": job.page_count,
@@ -212,11 +216,14 @@ async def run_job(job_id: str) -> None:
     # The result file is authoritative for the timings — the progress lines were
     # a live estimate, these are what the reader actually measured.
     timings = outcome["timings"]
-    _record_stage(job, Stage.EVIDENCE_OCR, timings.get("evidence_ocr", 0))
-    _record_stage(job, Stage.AI_VISION, timings.get("ai_vision", 0),
-                  detail=f"queue {timings.get('ai_queue', 0)}ms")
-    _record_stage(job, Stage.VERIFICATION, timings.get("verification", 0))
-    _record_stage(job, Stage.EXCEL, timings.get("excel", 0))
+    if cleaning:
+        _record_stage(job, Stage.CLEAN, timings.get("clean", 0))
+    else:
+        _record_stage(job, Stage.EVIDENCE_OCR, timings.get("evidence_ocr", 0))
+        _record_stage(job, Stage.AI_VISION, timings.get("ai_vision", 0),
+                      detail=f"queue {timings.get('ai_queue', 0)}ms")
+        _record_stage(job, Stage.VERIFICATION, timings.get("verification", 0))
+        _record_stage(job, Stage.EXCEL, timings.get("excel", 0))
     job.status = JobStatus.COMPLETED
     job.stage = None
     job.stage_started_at = None
@@ -231,19 +238,23 @@ async def run_job(job_id: str) -> None:
     job.flagged = [FlaggedValue(**item) for item in outcome["flagged"]]
     await job.save()
 
-    # Quota is spent on work actually delivered, not on attempts.
-    customer = await User.get(job.customer_id)
-    if customer is not None:
-        period = datetime.now(timezone.utc).strftime("%Y-%m")
-        if customer.quota_period != period:
-            customer.quota_period = period
-            customer.used_this_month = 0
-        customer.used_this_month += 1
-        await customer.save()
+    # Quota is spent on work actually delivered, not on attempts — and only on
+    # work that cost something to deliver. Cleaning a spreadsheet calls no model
+    # and leaves this machine at no point, so it is not counted and never
+    # refused for being over a limit.
+    if not cleaning:
+        customer = await User.get(job.customer_id)
+        if customer is not None:
+            period = datetime.now(timezone.utc).strftime("%Y-%m")
+            if customer.quota_period != period:
+                customer.quota_period = period
+                customer.used_this_month = 0
+            customer.used_this_month += 1
+            await customer.save()
 
     logger.info(
-        "JOB_DONE id=%s provider=%s pages=%d items=%d flagged=%d total_ms=%d",
-        job_id, job.ai_provider, job.page_count, job.items_extracted,
+        "JOB_DONE id=%s kind=%s provider=%s pages=%d items=%d flagged=%d total_ms=%d",
+        job_id, job.kind.value, job.ai_provider, job.page_count, job.items_extracted,
         job.flagged_count, job.total_ms,
     )
 

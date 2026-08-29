@@ -148,6 +148,24 @@ tbody tr:hover{background:var(--surface-2)}
 .a-bad{background:var(--bad-soft);color:var(--bad);border-color:var(--bad)}
 .a-ok{background:var(--ok-soft);color:var(--ok);border-color:var(--ok)}
 .drop{border:1.5px dashed var(--line-strong);border-radius:var(--r);padding:40px 20px;text-align:center;background:var(--surface-2);display:flex;flex-direction:column;align-items:center;gap:8px;transition:border-color .15s,background .15s;cursor:pointer}
+/* ---------------- choosing the job ----------------
+   Two cards rather than a dropdown: the difference between them is what the
+   customer is billed for, so it is worth the room to say it plainly. */
+.kinds{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+.kind{display:flex;flex-direction:column;align-items:flex-start;gap:5px;text-align:start;
+  padding:16px 17px;border:1.5px solid var(--line);border-radius:var(--r);background:var(--surface);
+  transition:border-color .15s,background .15s}
+.kind:hover{border-color:var(--line-strong)}
+.kind[aria-current="true"]{border-color:var(--accent);background:var(--accent-soft)}
+.kind .gi{margin-bottom:4px}
+.kind b{font-size:14.5px;font-weight:600}
+.kind small{font-size:12.5px;color:var(--muted);line-height:1.55}
+.kind-tag{margin-top:6px;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;
+  background:var(--surface-3);color:var(--muted)}
+.kind-tag.free{background:var(--ok-soft);color:var(--ok)}
+.kind[aria-current="true"] .gi{color:var(--accent);opacity:1}
+@media (max-width:560px){.kinds{grid-template-columns:1fr}}
+
 .drop:hover,.drop.over{border-color:var(--accent);background:var(--accent-soft)}
 .drop.over{transform:scale(1.01)}
 .drop.has{border-style:solid;border-color:var(--accent);background:var(--accent-soft)}

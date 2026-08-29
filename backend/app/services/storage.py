@@ -56,6 +56,52 @@ def _sniff(data: bytes) -> tuple[str, str] | None:
     return None
 
 
+# Spreadsheets, for the cleaning path. Deliberately a separate table from the
+# one above: an upload is accepted for the job it was sent to do, so a workbook
+# cannot arrive at the reader and a photograph cannot arrive at the cleaner.
+SPREADSHEET_SIGNATURES: list[tuple[bytes, str, str]] = [
+    # .xlsx and .xlsm are ZIP containers.
+    (b"PK\x03\x04", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx"),
+    # Legacy .xls is an OLE2 compound file.
+    (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", "application/vnd.ms-excel", ".xls"),
+]
+
+
+def _looks_like_csv(data: bytes) -> bool:
+    """A best effort, because CSV has no signature to check.
+
+    Text with a delimiter in its first lines is the whole of the evidence
+    available. The cleaner rejects it soon enough if it is wrong, and the
+    alternative — trusting the extension — is not evidence at all.
+    """
+    head = data[:8192]
+    if b"\x00" in head:
+        return False
+    try:
+        text = head.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        try:
+            text = head.decode("cp1256")  # Arabic Windows, the common alternative
+        except UnicodeDecodeError:
+            return False
+    lines = [line for line in text.splitlines() if line.strip()][:5]
+    return bool(lines) and any(any(sep in line for sep in ",;\t") for line in lines)
+
+
+def _sniff_spreadsheet(data: bytes, original_name: str) -> tuple[str, str] | None:
+    for magic, content_type, suffix in SPREADSHEET_SIGNATURES:
+        if data.startswith(magic):
+            # A .docx is a ZIP too. The extension cannot prove the type, but it
+            # can say which ZIP the sender meant, and openpyxl settles the rest.
+            claimed = Path(original_name).suffix.casefold()
+            if suffix == ".xlsx" and claimed not in {".xlsx", ".xlsm", ""}:
+                return None
+            return content_type, ".xlsm" if claimed == ".xlsm" else suffix
+    if _looks_like_csv(data):
+        return "text/csv", ".csv"
+    return None
+
+
 def _safe_display_name(name: str) -> str:
     """A filename fit to store and show, with no path in it.
 
@@ -67,7 +113,9 @@ def _safe_display_name(name: str) -> str:
     return cleaned[:120] or "document"
 
 
-def store_upload(data: bytes, original_name: str, customer_id: str) -> StoredFile:
+def store_upload(
+    data: bytes, original_name: str, customer_id: str, *, spreadsheet: bool = False
+) -> StoredFile:
     settings = get_settings()
     if not data:
         raise UploadRejected("file_empty", "The file is empty.")
@@ -78,12 +126,20 @@ def store_upload(data: bytes, original_name: str, customer_id: str) -> StoredFil
             limit=settings.max_upload_mb,
         )
 
-    sniffed = _sniff(data)
-    if sniffed is None:
-        raise UploadRejected(
-            "file_type",
-            "That file type is not supported. Send a PNG, JPG, WEBP, TIFF, BMP or PDF.",
-        )
+    if spreadsheet:
+        sniffed = _sniff_spreadsheet(data, original_name)
+        if sniffed is None:
+            raise UploadRejected(
+                "not_a_spreadsheet",
+                "That is not a spreadsheet. Send an XLSX, XLSM, XLS or CSV file.",
+            )
+    else:
+        sniffed = _sniff(data)
+        if sniffed is None:
+            raise UploadRejected(
+                "file_type",
+                "That file type is not supported. Send a PNG, JPG, WEBP, TIFF, BMP or PDF.",
+            )
     content_type, suffix = sniffed
 
     # The stored name is generated, never derived from the upload: a random

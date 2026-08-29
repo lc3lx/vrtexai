@@ -72,11 +72,13 @@ _STARTING_PLANS = [
         # here — a feature list that restates the headline reads as padding.
         features_ar=[
             "تحويل الفواتير المصوّرة والورقية إلى Excel",
+            "تنظيف ملفات Excel — غير محدود",
             "البوابات الثلاث للتحقق على كل مستند",
             "دعم عبر البريد",
         ],
         features_en=[
             "Photographed and paper invoices to Excel",
+            "Excel file cleaning — unlimited",
             "All three verification gates on every document",
             "Email support",
         ],

@@ -44,6 +44,7 @@ class PlanOut(BaseModel):
     monthly_limit: int
     features_ar: list[str]
     features_en: list[str]
+    cleaning_unlimited: bool
     highlighted: bool
 
 
@@ -90,6 +91,7 @@ async def public_plans() -> list[PlanOut]:
             monthly_limit=plan.monthly_limit,
             features_ar=plan.features_ar,
             features_en=plan.features_en,
+            cleaning_unlimited=plan.cleaning_unlimited,
             highlighted=plan.highlighted,
         )
         for plan in plans

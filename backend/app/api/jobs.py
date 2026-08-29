@@ -6,14 +6,14 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.api.deps import client_ip, current_user, owned_job
 from app.core.config import get_settings
 from app.core.errors import AppError, not_found
-from app.models.entities import AuditLog, Job, JobStatus, Role, User, as_utc
+from app.models.entities import AuditLog, Job, JobKind, JobStatus, Role, User, as_utc
 from app.services.pipeline import run_job
 from app.services.storage import UploadRejected, count_pdf_pages, store_upload
 
@@ -42,6 +42,7 @@ class FlagOut(BaseModel):
 class JobOut(BaseModel):
     id: str
     filename: str
+    kind: JobKind = JobKind.EXTRACT
     status: JobStatus
     stage: str | None = None
     items: int = 0
@@ -87,6 +88,7 @@ def _out(job: Job) -> JobOut:
     return JobOut(
         id=str(job.id),
         filename=job.filename,
+        kind=job.kind,
         status=job.status,
         stage=job.stage.value if job.stage else None,
         items=job.items_extracted,
@@ -113,6 +115,7 @@ async def _process(job_id: str) -> None:
 async def create_job(
     request: Request,
     file: UploadFile = File(...),
+    kind: JobKind = Form(JobKind.EXTRACT),
     user: User = Depends(current_user),
 ) -> JobOut:
     """Accept a document and start work. Returns immediately with a job id.
@@ -120,12 +123,19 @@ async def create_job(
     The HTTP request does not wait for the reading: a page can take minutes, and
     a connection held open that long fails for reasons that have nothing to do
     with the document.
+
+    ``kind`` decides which work is asked for, and it changes what the upload is
+    allowed to be: ``extract`` reads a page and spends quota, ``clean`` tidies a
+    spreadsheet the customer already has and spends none.
     """
     if user.role != Role.CUSTOMER:
         raise AppError(
             status.HTTP_403_FORBIDDEN, "customer_only", "sign in as a customer to upload"
         )
-    if user.monthly_quota and user.quota_remaining <= 0:
+    cleaning = kind == JobKind.CLEAN
+    # No quota gate on cleaning: nothing about it costs per document, so a limit
+    # on it would be a charge for nothing.
+    if not cleaning and user.monthly_quota and user.quota_remaining <= 0:
         raise AppError(
             status.HTTP_429_TOO_MANY_REQUESTS,
             "quota_exhausted",
@@ -135,14 +145,16 @@ async def create_job(
 
     data = await file.read()
     try:
-        stored = store_upload(data, file.filename or "document", str(user.id))
+        stored = store_upload(
+            data, file.filename or "document", str(user.id), spreadsheet=cleaning
+        )
     except UploadRejected as error:
         raise AppError(
             status.HTTP_400_BAD_REQUEST, error.code, str(error), **error.params
         ) from error
 
     settings = get_settings()
-    pages = count_pdf_pages(stored.path)
+    pages = 1 if cleaning else count_pdf_pages(stored.path)
     if pages == 0:
         stored.path.unlink(missing_ok=True)
         raise AppError(
@@ -161,6 +173,7 @@ async def create_job(
     job = Job(
         customer_id=str(user.id),
         admin_id=user.admin_id,
+        kind=kind,
         filename=stored.original_name,
         stored_name=stored.stored_name,
         content_type=stored.content_type,

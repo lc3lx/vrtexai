@@ -301,10 +301,13 @@ async function loadDashboard() {
 
   document.getElementById("jobsTable").innerHTML = jobs.length ? `
     <table><thead><tr>
-      <th>${esc(t("th_file"))}</th><th>${esc(t("th_status"))}</th><th>${esc(t("th_items"))}</th>
+      <th>${esc(t("th_file"))}</th><th>${esc(t("th_kind"))}</th>
+      <th>${esc(t("th_status"))}</th><th>${esc(t("th_items"))}</th>
       <th>${esc(t("th_flag"))}</th><th>${esc(t("th_time"))}</th><th></th></tr></thead>
     <tbody>${jobs.map((job) => `<tr>
       <td class="mono" data-l="${esc(t("th_file"))}">${esc(job.filename)}</td>
+      <td data-l="${esc(t("th_kind"))}"><span class="pill ${
+        job.kind === "clean" ? "p-idle" : "p-run"}">${esc(t("kind_" + (job.kind || "extract")))}</span></td>
       <td data-l="${esc(t("th_status"))}">${statusPill(job.status)}</td>
       <td class="mono" data-l="${esc(t("th_items"))}">${job.items || "—"}</td>
       <td class="mono" data-l="${esc(t("th_flag"))}">${job.flagged || "—"}</td>
@@ -316,7 +319,43 @@ async function loadDashboard() {
   enter(document.querySelector("#jobsTable tbody"));
 }
 
+/* Which of the two jobs the customer is starting. Extraction reads a page and
+   spends quota; cleaning tidies a spreadsheet they already have and spends
+   none, so the two accept different files and say different things. */
+let kind = "extract";
+const KINDS = {
+  extract: {
+    accept: ".png,.jpg,.jpeg,.webp,.tif,.tiff,.bmp,.pdf",
+    title: "drop", sub: "dropsub", note: "u_note",
+  },
+  clean: {
+    accept: ".xlsx,.xlsm,.xls,.csv",
+    title: "drop_clean", sub: "dropsub_clean", note: "u_note_clean",
+  },
+};
+
+function setKind(next) {
+  if (!KINDS[next]) return;
+  if (next !== kind) {
+    // The file already chosen almost certainly does not suit the other job.
+    picked = null;
+    fileInput.value = "";
+    clearError(document.getElementById("upError"));
+  }
+  kind = next;
+  renderUpload();
+}
+
 function renderUpload() {
+  const spec = KINDS[kind];
+  document.querySelectorAll("#kindPick .kind").forEach((button) => {
+    button.setAttribute("aria-current", String(button.dataset.kind === kind));
+  });
+  fileInput.setAttribute("accept", spec.accept);
+  document.getElementById("dropTitle").textContent = t(spec.title);
+  document.getElementById("dropSub").textContent = t(spec.sub);
+  document.getElementById("upNote").textContent = t(spec.note);
+
   const box = document.getElementById("pickedBox");
   box.classList.toggle("hidden", !picked);
   document.getElementById("startBtn").disabled = !picked;
@@ -350,6 +389,7 @@ document.getElementById("startBtn").addEventListener("click", async () => {
   try {
     const form = new FormData();
     form.append("file", picked);
+    form.append("kind", kind);
     const job = await api("/api/jobs", { method: "POST", body: form });
     picked = null;
     fileInput.value = "";
@@ -368,7 +408,15 @@ function openJob(id) {
   go("job");
 }
 
-const STAGE_ORDER = ["upload", "evidence_ocr", "ai_vision", "verification", "excel"];
+// The stages each kind of job passes through. A cleaning job never opens a page
+// or calls a model, so showing it five steps and ticking two would be a lie
+// about what it is doing.
+const STAGES_BY_KIND = {
+  extract: ["upload", "evidence_ocr", "ai_vision", "verification", "excel"],
+  clean: ["upload", "clean"],
+};
+const stagesOf = (job) => STAGES_BY_KIND[job.kind] || STAGES_BY_KIND.extract;
+
 // The three the reader repeats once per page. Everything about progress on a
 // multi-page document follows from that.
 const PER_PAGE_STAGES = ["evidence_ocr", "ai_vision", "verification"];
@@ -385,14 +433,17 @@ let live = { stageAt: 0, elapsedAt: 0, since: 0, shown: 0, running: false, job: 
 /** How far along the whole document is — honestly, and never at 100% early. */
 function jobProgress(job) {
   if (job.status === "completed") return 1;
+  const order = stagesOf(job);
   const finished = new Set(job.stages.map((entry) => entry.stage));
   if (job.status === "failed") {
     // Where it stopped, not how much had ever been ticked: a full bar over a
     // failure message is the interface contradicting itself.
-    const stopped = STAGE_ORDER.indexOf(job.stage);
-    return (stopped >= 0 ? stopped : finished.size) / STAGE_ORDER.length;
+    const stopped = order.indexOf(job.stage);
+    return (stopped >= 0 ? stopped : finished.size) / order.length;
   }
-  if (job.status !== "processing") return finished.size / STAGE_ORDER.length;
+  if (job.status !== "processing") return finished.size / order.length;
+  // Cleaning is one pass over one file: upload, then the work itself.
+  if (job.kind === "clean") return finished.has("upload") ? 0.5 : 0.1;
 
   // upload + (evidence, vision, verification) per page + one workbook build.
   const pages = Math.max(1, job.pages || 1);
@@ -407,10 +458,11 @@ function jobProgress(job) {
 
 /** What a single row in the tracker is doing right now. */
 function stageState(job, name) {
+  const order = stagesOf(job);
   const finished = new Set(job.stages.map((entry) => entry.stage));
   if (job.status === "failed") {
-    const stopped = STAGE_ORDER.indexOf(job.stage);
-    const here = STAGE_ORDER.indexOf(name);
+    const stopped = order.indexOf(job.stage);
+    const here = order.indexOf(name);
     if (here === stopped) return "bad";
     // A stage past the failure never ran, whatever an earlier page recorded.
     // Showing "done" beneath a failure would claim work that did not happen.
@@ -424,7 +476,7 @@ function stageState(job, name) {
 }
 
 function jobSkeleton(job) {
-  const rows = STAGE_ORDER.map((name) => `
+  const rows = stagesOf(job).map((name) => `
     <li class="step" data-stage="${name}">
       <span class="sdot"><b class="check"></b></span>
       <span class="sbody">
@@ -465,7 +517,7 @@ function paintJob(job) {
 
   document.getElementById("jkPill").innerHTML = statusPill(job.status);
 
-  STAGE_ORDER.forEach((name) => {
+  stagesOf(job).forEach((name) => {
     const row = document.querySelector(`#jkList .step[data-stage="${name}"]`);
     const state = stageState(job, name);
     // Only touch the class when it actually changed: rewriting it every poll
@@ -493,10 +545,12 @@ function paintJob(job) {
   const pages = Math.max(1, job.pages || 1);
   const title = { processing: "j_wait_h", completed: "j_done_h", failed: "j_fail_h" }[job.status];
   document.getElementById("jkTitle").textContent = t(title || "j_wait_h");
+  // A cleaning job has no pages to count through, so it does not pretend to.
   document.getElementById("jkSub").textContent = job.status === "processing"
-    ? (pages > 1
-        ? t("j_page").replace("{n}", Math.min(pages, (job.pages_done || 0) + 1)).replace("{total}", pages)
-        : t("j_page1"))
+    ? (job.kind === "clean" ? t("g_clean")
+        : pages > 1
+          ? t("j_page").replace("{n}", Math.min(pages, (job.pages_done || 0) + 1)).replace("{total}", pages)
+          : t("j_page1"))
     : job.status === "completed" ? t("j_alldone") : "";
 
   const errorBox = document.getElementById("jkErr");
@@ -626,30 +680,40 @@ async function renderResult() {
   }
   lastResult = job;
 
+  // A cleaned spreadsheet has rows, not extracted items, and no page count or
+  // model behind it. Reporting those would be reporting work that never ran.
+  const cleaning = job.kind === "clean";
+
   const flags = job.flags && job.flags.length
     ? `<div style="display:flex;flex-direction:column;gap:9px">
-         <div class="eyebrow">${esc(t("needs"))}</div>
+         <div class="eyebrow">${esc(t(cleaning ? "needs_clean" : "needs"))}</div>
          ${job.flags.map((flag) => `<div class="flagrow"><div>
             <div class="mono">${esc(flag.cell)} · ${esc(flag.value ?? "")}</div>
             <p>${esc(flag.reason)}</p></div></div>`).join("")}
        </div>`
-    : `<div class="alert a-ok">${esc(t("clean"))}</div>`;
+    // "Every value has evidence in the image" is true of a reading and false of
+    // a cleaning: there was no image and nothing was recomputed.
+    : `<div class="alert a-ok">${esc(t(cleaning ? "clean_ok" : "clean"))}</div>`;
+  const facts = cleaning
+    ? `<div class="rowline"><span>${esc(t("r_rows"))}</span><span class="mono">${job.items}</span></div>
+       <div class="rowline"><span>${esc(t("r_total"))}</span><span class="mono">${ms(job.total_ms)}</span></div>`
+    : `<div class="rowline"><span>${esc(t("r_items"))}</span><span class="mono">${job.items}</span></div>
+       <div class="rowline"><span>${esc(t("r_pages"))}</span><span class="mono">${job.pages}</span></div>
+       <div class="rowline"><span>${esc(t("r_prov"))}</span><span class="mono">${esc(job.provider || "—")}</span></div>
+       <div class="rowline"><span>${esc(t("r_total"))}</span><span class="mono">${ms(job.total_ms)}</span></div>`;
 
   host.innerHTML = `<div class="card">
     <div class="card-h"><h2 class="mono" style="word-break:break-all">${esc(job.filename)}</h2>
       <div class="spacer"></div>${statusPill(job.status)}</div>
     <div class="card-b" style="display:flex;flex-direction:column;gap:16px">
       ${flags}
-      <div>
-        <div class="rowline"><span>${esc(t("r_items"))}</span><span class="mono">${job.items}</span></div>
-        <div class="rowline"><span>${esc(t("r_pages"))}</span><span class="mono">${job.pages}</span></div>
-        <div class="rowline"><span>${esc(t("r_prov"))}</span><span class="mono">${esc(job.provider || "—")}</span></div>
-        <div class="rowline"><span>${esc(t("r_total"))}</span><span class="mono">${ms(job.total_ms)}</span></div>
-      </div>
+      <div>${facts}</div>
+      ${job.warnings && job.warnings.length
+        ? `<div class="alert a-flag">${job.warnings.map(esc).join("<br>")}</div>` : ""}
       <div class="alert a-bad hidden" id="dlErr"></div>
       ${job.has_result
         ? `<button class="btn btn-p btn-w" onclick="downloadResult('${job.id}')">${esc(t("dl"))}</button>` : ""}
-      <p class="note">${esc(t("r_note"))}</p>
+      <p class="note">${esc(t(cleaning ? "r_clean_note" : "r_note"))}</p>
     </div></div>`;
   enter(host.querySelector(".card-b"));
 }
@@ -859,7 +923,8 @@ async function loadPlans() {
 function openPlan(id) {
   const plan = plans.find((entry) => entry.id === id) || {
     slug: "", name_ar: "", name_en: "", price_amount: 0, currency: "USD", period: "monthly",
-    monthly_limit: 0, features_ar: [], features_en: [], highlighted: false,
+    monthly_limit: 0, features_ar: [], features_en: [], cleaning_unlimited: true,
+    highlighted: false,
     sort_order: plans.length + 1, active: true,
   };
   const lines = (list) => esc((list || []).join("\n"));
@@ -891,6 +956,9 @@ function openPlan(id) {
       <textarea id="pFeatAr" rows="4">${lines(plan.features_ar)}</textarea></div>
     <div class="field"><label>${esc(t("ap_feat_en"))}</label>
       <textarea id="pFeatEn" rows="4">${lines(plan.features_en)}</textarea></div>
+    <label class="rowline" style="cursor:pointer"><span>${esc(t("ap_clean"))}</span>
+      <input type="checkbox" id="pClean" ${plan.cleaning_unlimited ? "checked" : ""}
+             style="width:18px;height:18px"></label>
     <label class="rowline" style="cursor:pointer"><span>${esc(t("ap_hl"))}</span>
       <input type="checkbox" id="pHl" ${plan.highlighted ? "checked" : ""}
              style="width:18px;height:18px"></label>
@@ -919,6 +987,7 @@ async function savePlan(id) {
     sort_order: parseInt(document.getElementById("pOrder").value, 10) || 0,
     features_ar: splitLines("pFeatAr"),
     features_en: splitLines("pFeatEn"),
+    cleaning_unlimited: document.getElementById("pClean").checked,
     highlighted: document.getElementById("pHl").checked,
   };
   try {

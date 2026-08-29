@@ -80,6 +80,7 @@ Object.assign(T, {
   ld_p_note:["الأسعار بالدولار الأمريكي. تحتاج حجماً أكبر أو تكاملاً خاصاً؟ اطلب اشتراكك ونرتّب لك خطة مخصّصة.",
              "Prices in US dollars. Need more volume or a custom integration? Request access and we will arrange a tailored plan."],
   ld_p_limit:["حتى {n} صورة شهرياً","Up to {n} images per month"],
+  ld_p_cleaning:["+ تنظيف ملفات Excel غير محدود","+ Unlimited Excel file cleaning"],
   ld_p_pick:["اشترك الآن","Subscribe now"],
   ld_p_badge:["الأكثر طلباً","Most popular"],
   ld_p_monthly:["شهرياً","per month"],
@@ -144,6 +145,8 @@ function renderPlans() {
       <div class="plan-name">${esc(name)}</div>
       <div class="plan-price"><b>${money(plan)}</b><u>${esc(t(PERIOD_KEY[plan.period] || "ld_p_monthly"))}</u></div>
       <div class="plan-limit">${esc(limit)}</div>
+      ${plan.cleaning_unlimited
+        ? `<div class="plan-free">${esc(t("ld_p_cleaning"))}</div>` : ""}
       <ul>${features.map((line) => `<li>${esc(line)}</li>`).join("")}</ul>
       <button class="btn btn-p btn-w" data-plan="${esc(plan.slug)}">${esc(t("ld_p_pick"))}</button>
     </article>`;

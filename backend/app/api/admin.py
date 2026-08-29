@@ -255,6 +255,7 @@ class PlanIn(BaseModel):
     monthly_limit: int = Field(ge=0, le=10_000_000)
     features_ar: list[str] = Field(default_factory=list, max_length=12)
     features_en: list[str] = Field(default_factory=list, max_length=12)
+    cleaning_unlimited: bool = True
     highlighted: bool = False
     sort_order: int = Field(default=0, ge=0, le=999)
     active: bool = True
@@ -269,6 +270,7 @@ class PlanUpdate(BaseModel):
     monthly_limit: int | None = Field(default=None, ge=0, le=10_000_000)
     features_ar: list[str] | None = Field(default=None, max_length=12)
     features_en: list[str] | None = Field(default=None, max_length=12)
+    cleaning_unlimited: bool | None = None
     highlighted: bool | None = None
     sort_order: int | None = Field(default=None, ge=0, le=999)
     active: bool | None = None
@@ -286,6 +288,7 @@ def _plan_out(plan: Plan) -> dict:
         "monthly_limit": plan.monthly_limit,
         "features_ar": plan.features_ar,
         "features_en": plan.features_en,
+        "cleaning_unlimited": plan.cleaning_unlimited,
         "highlighted": plan.highlighted,
         "sort_order": plan.sort_order,
         "active": plan.active,

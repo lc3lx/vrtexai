@@ -48,11 +48,27 @@ class JobStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+class JobKind(str, Enum):
+    """What a job was asked to do.
+
+    The two are priced differently because they cost differently. Reading a
+    photographed invoice calls a vision model; tidying a spreadsheet the
+    customer already has is arithmetic and string work on our own machine, so it
+    spends no quota and is never rate limited.
+    """
+
+    EXTRACT = "extract"
+    CLEAN = "clean"
+
+
 class Stage(str, Enum):
     """The real stages of the pipeline, reported as they actually happen.
 
     There is no synthetic percentage here on purpose: the vision model does not
     report progress, and an invented number is worse than an honest wait.
+
+    A cleaning job walks a shorter path — ``upload`` then ``clean`` — because
+    there is no page to read and nothing for a model to say.
     """
 
     UPLOAD = "upload"
@@ -60,6 +76,16 @@ class Stage(str, Enum):
     AI_VISION = "ai_vision"
     VERIFICATION = "verification"
     EXCEL = "excel"
+    CLEAN = "clean"
+
+
+# The stages each kind of job actually passes through, in order.
+STAGES_BY_KIND: dict[JobKind, tuple[Stage, ...]] = {
+    JobKind.EXTRACT: (
+        Stage.UPLOAD, Stage.EVIDENCE_OCR, Stage.AI_VISION, Stage.VERIFICATION, Stage.EXCEL,
+    ),
+    JobKind.CLEAN: (Stage.UPLOAD, Stage.CLEAN),
+}
 
 
 class User(Document):
@@ -121,6 +147,7 @@ class Job(Document):
     customer_id: Indexed(str)  # type: ignore[valid-type]
     admin_id: str | None = None
 
+    kind: JobKind = JobKind.EXTRACT
     filename: str
     stored_name: str = ""
     content_type: str = ""
@@ -193,6 +220,10 @@ class Plan(Document):
     monthly_limit: int = 0
     features_ar: list[str] = Field(default_factory=list)
     features_en: list[str] = Field(default_factory=list)
+    # Cleaning a spreadsheet runs no model, so the monthly limit above does not
+    # apply to it. Kept as a per-plan switch rather than a constant because it is
+    # the administrator's to advertise, not ours to assume.
+    cleaning_unlimited: bool = True
     highlighted: bool = False
     sort_order: int = 0
     active: bool = True

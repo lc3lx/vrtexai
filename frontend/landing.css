@@ -178,6 +178,9 @@ html{scroll-behavior:smooth}
 .plan-price u{text-decoration:none;font-size:13px;color:var(--muted);font-weight:500}
 .plan-limit{font-size:13.5px;font-weight:600;color:var(--accent);
   background:var(--accent-soft);border-radius:var(--r-sm);padding:9px 12px}
+/* The part of the plan that carries no limit at all, said next to the one that does. */
+.plan-free{font-size:13px;font-weight:600;color:var(--ok);
+  background:var(--ok-soft);border-radius:var(--r-sm);padding:8px 12px;margin-top:-8px}
 .plan ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;flex:1}
 .plan li{font-size:13.5px;color:var(--ink-2);padding-inline-start:24px;position:relative;line-height:1.55}
 /* Physical borders, not logical: a tick is the same shape in both directions,

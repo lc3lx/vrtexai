@@ -87,20 +87,34 @@
 
     <!-- customer: upload -->
     <section class="content hidden" id="p-up">
+      <div class="kinds" id="kindPick">
+        <button class="kind" data-kind="extract" onclick="setKind('extract')">
+          <i class="gi up"></i>
+          <b data-t="k_extract"></b>
+          <small data-t="k_extract_p"></small>
+          <span class="kind-tag" data-t="k_uses_quota"></span>
+        </button>
+        <button class="kind" data-kind="clean" onclick="setKind('clean')">
+          <i class="gi dash"></i>
+          <b data-t="k_clean"></b>
+          <small data-t="k_clean_p"></small>
+          <span class="kind-tag free" data-t="k_unlimited"></span>
+        </button>
+      </div>
       <div class="card"><div class="card-b" style="display:flex;flex-direction:column;gap:15px">
         <div class="alert a-bad hidden" id="upError"></div>
         <label class="drop" id="drop">
           <input type="file" id="fileInput" class="hidden"
                  accept=".png,.jpg,.jpeg,.webp,.tif,.tiff,.bmp,.pdf">
           <div class="ic"></div>
-          <b data-t="drop"></b><small data-t="dropsub"></small>
+          <b id="dropTitle"></b><small id="dropSub"></small>
         </label>
         <div id="pickedBox" class="hidden">
           <div class="rowline"><span data-t="u_file"></span><span class="mono" id="pickedName"></span></div>
           <div class="rowline"><span data-t="u_size"></span><span class="mono" id="pickedSize"></span></div>
         </div>
         <button class="btn btn-p btn-w" id="startBtn" disabled data-t="start"></button>
-        <p class="note" data-t="u_note"></p>
+        <p class="note" id="upNote"></p>
       </div></div>
     </section>
 

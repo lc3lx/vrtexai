@@ -44,6 +44,60 @@ def _worker_on_path(worker_root: str) -> None:
         sys.path.insert(0, worker_root)
 
 
+def run_clean(request: dict[str, Any]) -> dict[str, Any]:
+    """Tidy a spreadsheet the customer already has.
+
+    No model is called and nothing leaves this machine: header rows above the
+    real one are dropped, every cell is normalised, duplicate rows are removed,
+    and anything corrected against the local lists is highlighted for a human.
+    It is the desktop product's own cleaner, reused rather than reimplemented.
+    """
+    _worker_on_path(request["worker_root"])
+
+    from clean import load_master_data
+    from tabular import clean_tabular
+
+    source = Path(request["source"])
+    result_dir = Path(request["result_dir"])
+    result_dir.mkdir(parents=True, exist_ok=True)
+
+    report("clean", "running", page=1, pages=1)
+    started = time.perf_counter()
+    outcome = clean_tabular(source, load_master_data(request.get("master_root")), result_dir)
+    elapsed = int((time.perf_counter() - started) * 1000)
+    report("clean", "done", ms=elapsed, page=1, pages=1, page_complete=True)
+
+    if outcome.status == "failed" or not outcome.output:
+        return {
+            "ok": False,
+            "code": "clean_failed",
+            "error": outcome.error or "the spreadsheet could not be cleaned",
+        }
+
+    return {
+        "ok": True,
+        "result": str(outcome.output),
+        "records": outcome.records,
+        "low_confidence": outcome.low_confidence,
+        # The cleaner marks whole rows rather than single cells, so each entry
+        # points at the row it corrected.
+        "flagged": [
+            {
+                "cell": f"{item.get('sheet') or ''}!{item.get('row') or ''}",
+                "value": item.get("value"),
+                "reason": str(item.get("suggestion") or "corrected against local lists"),
+                "gate": "cleaning",
+            }
+            for item in (outcome.review_items or [])
+        ],
+        "warnings": list(outcome.warnings or [])[:50],
+        "timings": {"clean": elapsed},
+        "provider": "local",
+        "model": "deterministic-cleaner",
+        "pages": 1,
+    }
+
+
 def run(request: dict[str, Any]) -> dict[str, Any]:
     _worker_on_path(request["worker_root"])
 
@@ -162,7 +216,7 @@ def main() -> int:
     request = json.loads(request_path.read_text(encoding="utf-8"))
     output = Path(request["result_json"])
     try:
-        result = run(request)
+        result = run_clean(request) if request.get("kind") == "clean" else run(request)
     except Exception as error:
         # A code as well as the text: the browser says why in the reader's own
         # language, and the text stays in the record for whoever debugs it.
