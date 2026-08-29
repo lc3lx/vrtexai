@@ -103,6 +103,7 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
 
     import ai_extract
     import excel_builder
+    import geometry
     import paddle_vl
     import perceive
     from ocr import image_pages
@@ -160,6 +161,23 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
         report("verification", "running", page=page_number, pages=total_pages)
         started = time.perf_counter()
         payload = paddle_vl.to_payload(outcome.pages[0].as_payload())
+
+        # Where each label and value actually sit on the page. The vision model
+        # returns text in reading order and the hosted providers return no
+        # geometry at all, so a field printed beside another — "Invoice No: 118
+        # Date: 04/03/2026" — could be paired with its neighbour's value. The
+        # evidence reader has a box for every word, so the pairing is taken from
+        # the page itself and believed over the text-order guess.
+        try:
+            positioned = geometry.read_fields(words)
+            for field, value in positioned["header"].items():
+                payload.setdefault("header", {})[field] = value
+            for field, value in positioned["extra"].items():
+                payload.setdefault("header", {}).setdefault(field, value)
+            for field, amount in positioned["totals"].items():
+                payload.setdefault("totals", {})[field] = amount
+        except Exception as error:
+            warnings.append(f"geometry-skipped:{type(error).__name__}")
         document, blocking, _advisory = ai_extract.validate(
             payload, ai_extract.page_numbers(words)
         )

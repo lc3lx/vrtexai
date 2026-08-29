@@ -118,7 +118,7 @@ def _repair_venv_home(root: Path) -> None:
         # at a directory that exists only on the build machine, and the failure
         # would surface much later as an unexplained import error.
         raise RuntimeError(
-            f"تعذّر تصحيح مسار بيئة PaddleOCR-VL ({config}): {error}"
+            f"Could not correct the PaddleOCR-VL environment path ({config}): {error}"
         ) from error
 
 
@@ -134,12 +134,12 @@ def enabled() -> bool:
 def available() -> tuple[bool, str]:
     """(usable, detail) — same shape as ``vision.available``."""
     if not enabled():
-        return False, "معطّل عبر VERTEX_AI_EXTRACT=off"
+        return False, "disabled by VERTEX_AI_EXTRACT=off"
     if worker_python() is None:
-        return False, "مكوّنات PaddleOCR-VL غير مضمّنة في هذه النسخة."
+        return False, "PaddleOCR-VL components are not bundled in this build."
     models = models_root()
     if models is None or not any(models.rglob("*")):
-        return False, "أوزان PaddleOCR-VL غير منزّلة — شغّل التهيئة الأولية."
+        return False, "PaddleOCR-VL weights are not downloaded — run first-time setup."
     return True, f"PaddleOCR-VL @ {models}"
 
 
@@ -188,13 +188,13 @@ def _start_server() -> subprocess.Popen:
     """
     worker = Path(__file__).resolve().parent / "vl_worker.py"
     if not worker.is_file():
-        raise RuntimeError("ملف تشغيل PaddleOCR-VL غير موجود.")
+        raise RuntimeError("The PaddleOCR-VL worker script is missing.")
     interpreter = worker_python()
     if interpreter is None:
-        raise RuntimeError("بيئة PaddleOCR-VL غير مثبّتة في هذه النسخة.")
+        raise RuntimeError("The PaddleOCR-VL environment is not installed in this build.")
     from common import emit
 
-    emit("جارٍ تحميل نموذج PaddleOCR-VL المحلي (مرة واحدة لكل دفعة)…")
+    emit("Loading the local PaddleOCR-VL model (once per batch)…")
     process = subprocess.Popen(
         [str(interpreter), str(worker), "--serve"],
         stdin=subprocess.PIPE,
@@ -209,7 +209,7 @@ def _start_server() -> subprocess.Popen:
     while True:
         line = process.stdout.readline() if process.stdout else ""
         if not line:
-            raise RuntimeError("تعذّر تشغيل محرك PaddleOCR-VL.")
+            raise RuntimeError("The PaddleOCR-VL engine could not be started.")
         try:
             payload = json.loads(line)
         except ValueError:
@@ -280,18 +280,18 @@ def _run_worker(image_path: Path) -> dict[str, Any]:
             # A wedged model would otherwise hang the whole batch with no way
             # out but the task manager.
             shutdown()
-            raise RuntimeError("تجاوز محرك PaddleOCR-VL المهلة أثناء قراءة الصفحة.") from error
+            raise RuntimeError("The PaddleOCR-VL engine timed out reading the page.") from error
         except (BrokenPipeError, OSError) as error:
             shutdown()
-            raise RuntimeError("توقّف محرك PaddleOCR-VL أثناء القراءة.") from error
+            raise RuntimeError("The PaddleOCR-VL engine stopped while reading.") from error
         if not line:
             shutdown()
-            raise RuntimeError("توقّف محرك PaddleOCR-VL دون إجابة.")
+            raise RuntimeError("The PaddleOCR-VL engine stopped without answering.")
         reply = json.loads(line)
         if not reply.get("ok"):
-            raise RuntimeError(f"فشل محرك PaddleOCR-VL: {reply.get('error') or 'بدون تفاصيل'}")
+            raise RuntimeError(f"The PaddleOCR-VL engine failed: {reply.get('error') or 'no detail given'}")
         if not destination.is_file():
-            raise RuntimeError("لم يكتب محرك PaddleOCR-VL أي نتيجة.")
+            raise RuntimeError("The PaddleOCR-VL engine wrote no result.")
         return json.loads(destination.read_text(encoding="utf-8"))
 
 
@@ -306,7 +306,7 @@ def read_page(image: Any, variant: str = "raw") -> dict[str, Any]:
         raw = _run_worker(page_path)
     pages = raw.get("pages") or []
     if not pages:
-        raise RuntimeError("لم يُرجع محرك PaddleOCR-VL أي صفحة.")
+        raise RuntimeError("The PaddleOCR-VL engine returned no page.")
     return to_payload(pages[0])
 
 
@@ -521,14 +521,24 @@ def to_payload(page: dict[str, Any]) -> dict[str, Any]:
                 for index, role in enumerate(roles)
             ]
 
-    # Any table that is not the item grid is page text, not silently dropped.
+    # Any table that is not the item grid carries page detail, not silently
+    # dropped. A two-column one is a list of label/value pairs — that is what
+    # invoices use for "Invoice No", "VAT", "Total" — so it is kept as pairs
+    # rather than pasted into one string. Cells joined with " | " used to arrive
+    # in the workbook as a single unreadable cell, and the field patterns then
+    # had to guess where one value ended and the next label began.
+    side_fields: list[tuple[str, str]] = []
     for table in tables:
         if table is grid:
             continue
         for row in table:
-            joined = " | ".join(str(value).strip() for value in row if str(value).strip())
-            if joined:
-                lines.append(joined)
+            cells = [str(value).strip() for value in row if str(value).strip()]
+            if not cells:
+                continue
+            if len(cells) == 2:
+                side_fields.append((cells[0], cells[1]))
+            else:
+                lines.extend(cells)
 
     header = extract_invoice_fields(lines)
     currency = header.pop("currency", "")
@@ -536,6 +546,24 @@ def to_payload(page: dict[str, Any]) -> dict[str, Any]:
     for key in ("subtotal", "tax_amount", "grand_total"):
         if key in header:
             header.pop(key, None)
+
+    # A two-column table already says which value belongs to which label, so it
+    # is believed over anything a pattern guessed from running text.
+    from geometry import canonical_field, to_number, total_field
+
+    for label, value in side_fields:
+        clean_label = re.sub(r"[:：]\s*$", "", label).strip()
+        total_name = total_field(clean_label)
+        if total_name is not None:
+            amount = to_number(value)
+            if amount is not None:
+                totals[total_name] = amount
+            continue
+        field = canonical_field(clean_label)
+        if field is not None:
+            header[field] = value
+        elif clean_label and len(clean_label) <= 40:
+            header.setdefault(clean_label, value)
 
     return {
         "document_type": "invoice" if (items and totals) else ("table" if items else "other"),

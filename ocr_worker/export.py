@@ -202,7 +202,7 @@ def write_dynamic_workbook(
         sheets = [{
             "name": "Extracted",
             "columns": ["Message"],
-            "rows": [["لم يُرجع النموذج أي جداول."]],
+            "rows": [["The model returned no tables."]],
         }]
 
     for index, sheet_spec in enumerate(sheets, start=1):
@@ -399,13 +399,13 @@ def write_single_sheet(
             row_number += 1  # blank spacer between sections
 
         if row_number == 1:
-            sheet.cell(1, 1, "لم يتم استخراج أي بيانات من هذه الصفحة.")
+            sheet.cell(1, 1, "No data could be extracted from this page.")
         for column_index, width_value in widths.items():
             sheet.column_dimensions[get_column_letter(column_index)].width = max(10, width_value)
 
     if not book.worksheets:
         sheet = book.create_sheet(title="Extracted")
-        sheet.cell(1, 1, "لم يتم استخراج أي بيانات من هذا الملف.")
+        sheet.cell(1, 1, "No data could be extracted from this file.")
 
     destination = _save_workbook(book, destination)
     for item in review_items:

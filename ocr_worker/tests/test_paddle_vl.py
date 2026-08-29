@@ -204,14 +204,34 @@ class PayloadTests(unittest.TestCase):
         self.assertEqual(payload["items"], [])
         self.assertIn("ملاحظة مكتوبة بخط اليد", payload["notes"])
 
-    def test_a_second_table_becomes_page_text_rather_than_being_dropped(self):
+    def test_a_second_table_becomes_fields_rather_than_being_dropped(self):
+        """A two-column side table is a list of fields, so it is read as one.
+
+        It used to be pasted into a note as "الرقم الضريبي | 300000000" — one
+        unreadable cell in the workbook, and a string the field patterns then
+        had to guess their way back out of. The table already says which value
+        belongs to which label; believing it is both simpler and right.
+        """
         extra = "<table><tr><td>الرقم الضريبي</td><td>300000000</td></tr></table>"
         payload = paddle_vl.to_payload(page(result={"parsing_res_list": [
             {"block_label": "table", "block_content": ITEM_TABLE},
             {"block_label": "table", "block_content": extra},
         ]}))
         self.assertEqual(len(payload["items"]), 3)
-        self.assertTrue(any("300000000" in note for note in payload["notes"]))
+        self.assertEqual(payload["header"].get("tax_number"), "300000000")
+        # And nothing anywhere carries the two pasted together.
+        for note in payload["notes"]:
+            self.assertNotIn("|", note)
+
+    def test_an_unknown_side_label_keeps_the_wording_the_document_used(self):
+        """Every company prints different fields, so an unrecognised one is kept
+        under its own label rather than discarded or flattened into text."""
+        extra = "<table><tr><td>Delivery Note</td><td>DN-4471</td></tr></table>"
+        payload = paddle_vl.to_payload(page(result={"parsing_res_list": [
+            {"block_label": "table", "block_content": ITEM_TABLE},
+            {"block_label": "table", "block_content": extra},
+        ]}))
+        self.assertEqual(payload["header"].get("Delivery Note"), "DN-4471")
 
     def test_pictures_and_seals_are_skipped(self):
         payload = paddle_vl.to_payload(page(result={"parsing_res_list": [
