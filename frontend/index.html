@@ -27,7 +27,11 @@
         <div class="field"><label data-t="email"></label>
           <input type="email" id="email" autocomplete="username" required></div>
         <div class="field"><label data-t="pw"></label>
-          <input type="password" id="password" autocomplete="current-password" required></div>
+          <div class="pwbox">
+            <input type="password" id="password" autocomplete="current-password" required>
+            <button type="button" class="pweye" id="pwEye" onclick="togglePassword()"
+                    aria-controls="password" aria-pressed="false" data-t-label="pw_show"></button>
+          </div></div>
         <button class="btn btn-p btn-w" type="submit" id="loginBtn" data-t="login"></button>
       </form>
     </div></div>

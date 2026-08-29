@@ -164,6 +164,26 @@ _CANONICAL: list[tuple[str, re.Pattern[str]]] = [
     ("due_date", re.compile(r"due\s*date|تاريخ\s*الاستحقاق", re.I)),
     ("supplier", re.compile(r"supplier|vendor|seller|sold\s*by|المورد|البائع", re.I)),
     ("client_name", re.compile(r"customer|client|buyer|bill\s*to|sold\s*to|العميل|المشتري", re.I)),
+    # Shipping paperwork names its two parties by their role in the movement,
+    # not in the sale. Order matters twice over here: the phone and address
+    # lines are tried before the bare party name so "Shipper Phone" is not
+    # swallowed by the pattern for "Shipper", and the consignee is tried before
+    # the shipper because Arabic writes it as المرسل إليه — the shipper's own
+    # word with one more after it.
+    ("consignee_phone", re.compile(
+        r"(?:consignee|receiver|recipient|deliver\s*to|ship\s*to)[^\w]*"
+        r"(?:phone|tel|mobile|contact)"
+        r"|(?:هاتف|جوال|تلفون)\s*(?:المرسل\s*إليه|المستلم)", re.I)),
+    ("shipper_phone", re.compile(
+        r"(?:shipper|sender|consignor)[^\w]*(?:phone|tel|mobile|contact)"
+        r"|(?:هاتف|جوال|تلفون)\s*(?:المرسل|الشاحن)", re.I)),
+    ("consignee_address", re.compile(
+        r"(?:consignee|receiver|recipient)[^\w]*address|عنوان\s*(?:المرسل\s*إليه|المستلم)", re.I)),
+    ("shipper_address", re.compile(
+        r"(?:shipper|sender|consignor)[^\w]*address|عنوان\s*(?:المرسل|الشاحن)", re.I)),
+    ("consignee", re.compile(
+        r"consignee|receiver|recipient|deliver\s*to|ship\s*to|المرسل\s*إليه|المستلم", re.I)),
+    ("shipper", re.compile(r"shipper|consignor|\bsender\b|المرسل|الشاحن", re.I)),
     ("tax_number", re.compile(r"\b(?:vat|tax|gst)\s*(?:no|number|id|reg)|الرقم\s*الضريبي", re.I)),
     ("payment_terms", re.compile(r"payment\s*terms?|\bterms\b|شروط\s*الدفع", re.I)),
     ("purchase_order", re.compile(r"\b(?:po|p\.o\.|purchase\s*order)\b|أمر\s*الشراء", re.I)),

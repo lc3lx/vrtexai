@@ -286,5 +286,116 @@ class ReadAttemptTests(unittest.TestCase):
         self.assertEqual(self.reads, ai_extract.MAX_READ_ATTEMPTS)
 
 
+def page(number: int, **overrides) -> dict:
+    """One validated page, as ``analyze`` has it just before merging."""
+    document, _blocking, _advisory = ai_extract.validate(payload(**overrides), set())
+    document["page"] = number
+    return document
+
+
+class MergeTests(unittest.TestCase):
+    """A four-page manifest is one shipment, not four.
+
+    The join is refused rather than guessed at: merging two invoices that
+    happened to share a template would sum one customer's goods into another's
+    total, which is a worse failure than splitting a document that belonged
+    together — a reviewer sees that at a glance.
+    """
+
+    def test_a_continuation_page_becomes_more_rows_of_the_same_document(self):
+        first = page(1, header={"invoice_number": "INV-7", "consignee": "Northwind"})
+        second = page(2, header={"invoice_number": "INV-7"}, items=[
+            {"description": "دفتر", "qty": 1, "unit_price": 4.0, "line_total": 4.0},
+        ], totals={})
+        merged = ai_extract.merge_pages([first, second])
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(len(merged[0]["items"]), 3)
+        self.assertEqual(merged[0]["pages"], [1, 2])
+
+    def test_the_header_reaches_every_row_of_a_later_page(self):
+        first = page(1, header={"invoice_number": "INV-7", "consignee": "Northwind"})
+        second = page(2, header={"invoice_number": "INV-7"}, items=[
+            {"description": "دفتر", "qty": 1, "unit_price": 4.0, "line_total": 4.0},
+        ], totals={})
+        merged = ai_extract.merge_pages([first, second])
+        self.assertEqual(merged[0]["header"]["consignee"], "Northwind")
+        self.assertEqual([item["_page"] for item in merged[0]["items"]], [1, 1, 2])
+
+    def test_two_different_orders_stay_two_documents(self):
+        first = page(1, header={"invoice_number": "INV-7"})
+        second = page(2, header={"invoice_number": "INV-8"})
+        merged = ai_extract.merge_pages([first, second])
+        self.assertEqual(len(merged), 2)
+
+    def test_a_page_naming_a_different_consignee_starts_a_new_document(self):
+        # Neither page carries a number, so the parties are what separates them.
+        first = page(1, header={"consignee": "Northwind"})
+        second = page(2, header={"consignee": "Contoso"})
+        merged = ai_extract.merge_pages([first, second])
+        self.assertEqual(len(merged), 2)
+
+    def test_an_unheaded_continuation_page_joins_the_page_before_it(self):
+        # The commonest shape: page 2 of a manifest is the grid and nothing else.
+        first = page(1, header={"consignee": "Northwind"})
+        second = page(2, header={}, totals={}, items=[
+            {"description": "دفتر", "qty": 1, "unit_price": 4.0, "line_total": 4.0},
+        ])
+        merged = ai_extract.merge_pages([first, second])
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["header"]["consignee"], "Northwind")
+
+    def test_a_page_with_a_different_table_starts_a_new_document(self):
+        first = page(1, header={})
+        second = page(2, header={}, columns=["البند", "المبلغ"],
+                      column_roles=["description", "line_total"], totals={}, items=[
+                          {"description": "شحن", "line_total": 4.0},
+                      ])
+        merged = ai_extract.merge_pages([first, second])
+        self.assertEqual(len(merged), 2)
+
+    def test_the_last_page_to_state_a_total_is_the_one_that_means_it(self):
+        # An earlier page carries a running figure; the last carries the amount
+        # due, and that is the one the arithmetic must be checked against.
+        first = page(1, header={"invoice_number": "INV-7"},
+                     totals={"subtotal": 61.0, "grand_total": 61.0})
+        second = page(2, header={"invoice_number": "INV-7"}, items=[
+            {"description": "دفتر", "qty": 1, "unit_price": 4.0, "line_total": 4.0},
+        ], totals={"subtotal": 65.0, "grand_total": 65.0})
+        merged = ai_extract.merge_pages([first, second])
+        self.assertEqual(merged[0]["totals"]["grand_total"], 65.0)
+
+    def test_the_arithmetic_is_rechecked_against_the_whole_document(self):
+        # Page 1's items do not add up to a subtotal that covers both pages, and
+        # that page-level complaint must not survive into the merged sheet.
+        first = page(1, header={"invoice_number": "INV-7"},
+                     totals={"subtotal": 65.0, "grand_total": 65.0})
+        self.assertTrue(first["totals_review"].get("subtotal"))
+        second = page(2, header={"invoice_number": "INV-7"}, items=[
+            {"description": "دفتر", "qty": 1, "unit_price": 4.0, "line_total": 4.0},
+        ], totals={"subtotal": 65.0, "grand_total": 65.0})
+        merged = ai_extract.merge_pages([first, second])
+        self.assertEqual(merged[0]["totals_review"], {})
+
+    def test_a_single_page_document_is_left_exactly_as_it_was(self):
+        only = page(1)
+        merged = ai_extract.merge_pages([only])
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["pages"], [1])
+
+
+class PageTextTests(unittest.TestCase):
+    def test_the_loose_page_text_never_reaches_the_document(self):
+        document, _blocking, _advisory = ai_extract.validate(
+            payload(notes=["YOUR LOGO", "Shipping Manifest"]), set()
+        )
+        self.assertNotIn("notes", document)
+
+    def test_a_page_of_fields_alone_is_not_treated_as_an_empty_read(self):
+        _document, blocking, _advisory = ai_extract.validate(
+            payload(items=[], totals={}, header={"consignee": "Northwind"}), set()
+        )
+        self.assertFalse(any("returned no items" in message for message in blocking))
+
+
 if __name__ == "__main__":
     unittest.main()

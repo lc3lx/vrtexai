@@ -197,14 +197,25 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
     if not documents:
         raise RuntimeError("no page could be read from this file")
 
-    report("excel", "running", page=len(documents), pages=total_pages)
+    # The pages of one order become one document before anything is written. A
+    # four-page manifest read page by page produced four sheets, each repeating
+    # the same shipper and consignee and each holding a quarter of the goods —
+    # so no total covered the shipment the customer was actually checking.
+    # Documents that do not belong together are left apart; see
+    # ``ai_extract.continues`` for what counts as belonging.
+    read_pages = len(documents)
+    documents = ai_extract.merge_pages(documents)
+    if len(documents) < read_pages:
+        warnings.append(f"merged {read_pages} pages into {len(documents)}")
+
+    report("excel", "running", page=total_pages, pages=total_pages)
     started = time.perf_counter()
     destination = Path(request["result_dir"]) / f"{source.stem}.xlsx"
     records, low, review_items, _template, written = excel_builder.write_ai_workbook(
         destination, source, documents
     )
     timings["excel"] = int((time.perf_counter() - started) * 1000)
-    report("excel", "done", ms=timings["excel"], page=len(documents), pages=total_pages)
+    report("excel", "done", ms=timings["excel"], page=total_pages, pages=total_pages)
 
     flagged = [
         {

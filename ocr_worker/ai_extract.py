@@ -92,16 +92,19 @@ def _normalise(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         "currency": str(payload.get("currency") or "").strip(),
         "title": str(payload.get("title") or "").strip(),
         "header": {},
-        "notes": [],
     }
     for key, value in (payload.get("header") or {}).items():
         if value in (None, ""):
             continue
         document["header"][str(key).strip()] = str(value).strip()
-    for note in payload.get("notes") or []:
-        text = str(note).strip()
-        if text:
-            document["notes"].append(text)
+
+    # The reader's loose page text does not travel any further. Everything in it
+    # that names something — a field, a party, an amount — has already been
+    # lifted into ``header`` and ``totals`` by :mod:`paddle_vl`; what remains is
+    # the logo line, the document title and the address block already captured
+    # beside its own label. Written under the table it became a second,
+    # unaligned document inside the customer's sheet, which is what they asked
+    # us to take out.
 
     columns = [str(name).strip() for name in (payload.get("columns") or [])]
     roles = [str(role).strip().casefold() for role in (payload.get("column_roles") or [])]
@@ -340,9 +343,127 @@ def validate(
     arithmetic_errors = check_arithmetic(document)
     grounding_errors = check_grounding(document, seen)
     blocking = list(shape_errors) + list(arithmetic_errors)
-    if not document.get("items") and not document.get("notes"):
-        blocking.append("The model returned no items and no text from the page.")
+    if not document.get("items") and not document.get("header") and not document.get("totals"):
+        blocking.append("The model returned no items and no fields from the page.")
     return document, blocking, grounding_errors
+
+
+# --------------------------------------------------------------------------
+# Pages of one order
+# --------------------------------------------------------------------------
+#
+# A four-page manifest is one shipment, not four. Read page by page it became
+# four sheets, each repeating the same shipper and consignee and each carrying a
+# quarter of the goods — so a total covered the page it happened to sit on and
+# nothing added up against the paper. These functions put the pages of one order
+# back together: the header from the page that printed it, the items from all of
+# them in order, the totals from the last page that stated them.
+#
+# The join is refused rather than guessed at. Two invoices in one PDF stay two
+# documents, because merging them would silently sum one customer's goods into
+# another's total — a far worse failure than splitting a document that belonged
+# together, which a reviewer sees at a glance.
+_ORDER_KEYS = ("invoice_number", "purchase_order")
+
+
+def _identity(document: dict[str, Any]) -> str:
+    """The order number this page claims, normalised for comparison."""
+    header = document.get("header") or {}
+    for key in _ORDER_KEYS:
+        value = str(header.get(key) or "").strip()
+        if value:
+            return re.sub(r"[^0-9a-zء-ي]", "", value.casefold())
+    return ""
+
+
+def _columns_of(document: dict[str, Any]) -> tuple[str, ...]:
+    roles = [role for role in (document.get("column_roles") or []) if role != "other"]
+    if roles:
+        return tuple(roles)
+    return tuple(str(name).strip().casefold() for name in (document.get("columns") or []))
+
+
+def _contradicts(base: dict[str, Any], page: dict[str, Any]) -> bool:
+    """Do the two pages disagree about a field they both name?
+
+    Compared on the fields themselves, not on how they were typed: a continuation
+    page reprints the consignee in a smaller box and the reader returns it with
+    different spacing or a dropped comma.
+    """
+    base_header = base.get("header") or {}
+    page_header = page.get("header") or {}
+    for key, value in page_header.items():
+        other = base_header.get(key)
+        if other is None:
+            continue
+        left = re.sub(r"\W+", "", str(value).casefold())
+        right = re.sub(r"\W+", "", str(other).casefold())
+        if left and right and left != right:
+            return True
+    return False
+
+
+def continues(base: dict[str, Any], page: dict[str, Any]) -> bool:
+    """Is ``page`` the rest of ``base``, rather than a new document?"""
+    base_id, page_id = _identity(base), _identity(page)
+    if base_id and page_id:
+        # Both pages say which order they belong to. Nothing else is needed,
+        # and nothing else is allowed to overrule it.
+        return base_id == page_id
+    if _contradicts(base, page):
+        return False
+    if not page.get("items"):
+        # A page of fields alone — a terms sheet, a signature page — belongs to
+        # the document it follows.
+        return True
+    base_columns, page_columns = _columns_of(base), _columns_of(page)
+    return bool(base_columns) and base_columns == page_columns
+
+
+def _absorb(base: dict[str, Any], page: dict[str, Any]) -> None:
+    """Fold a continuation page into the document it continues."""
+    base.setdefault("pages", [base.get("page", 1)])
+    base["pages"].append(page.get("page", 0))
+    for item in page.get("items") or []:
+        item.setdefault("_page", page.get("page", 0))
+        base.setdefault("items", []).append(item)
+    for key, value in (page.get("header") or {}).items():
+        # Only what the earlier pages never said. The first page a field appears
+        # on is the one that printed it in full.
+        base.setdefault("header", {}).setdefault(key, value)
+    # The last page to state a total is the one that means it: an earlier page
+    # carries a running figure, the last carries the amount due.
+    base.setdefault("totals", {}).update(page.get("totals") or {})
+    if not base.get("currency"):
+        base["currency"] = page.get("currency") or ""
+    if not base.get("columns"):
+        base["columns"] = page.get("columns") or []
+        base["column_roles"] = page.get("column_roles") or []
+
+
+def merge_pages(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group the pages of one order into one document, in page order."""
+    merged: list[dict[str, Any]] = []
+    for document in documents:
+        document.setdefault("pages", [document.get("page", 1)])
+        for item in document.get("items") or []:
+            item.setdefault("_page", document.get("page", 1))
+        if merged and continues(merged[-1], document):
+            _absorb(merged[-1], document)
+        else:
+            merged.append(document)
+
+    for document in merged:
+        if len(document.get("pages") or []) < 2:
+            continue
+        # The arithmetic was checked a page at a time, against a subtotal that
+        # covered only that page. Now that every item is present it is checked
+        # against the document's own totals, and the page-level complaints it
+        # replaces are cleared rather than left standing.
+        document["totals_review"] = {}
+        document["totals_notes"] = {}
+        check_arithmetic(document)
+    return merged
 
 
 # --------------------------------------------------------------------------
@@ -440,6 +561,11 @@ def analyze(source: Path, master: dict[str, list[str]], output_dir: Path) -> Fil
 
     if not documents:
         raise RuntimeError("No page in this file could be read.")
+
+    read = len(documents)
+    documents = merge_pages(documents)
+    if len(documents) < read:
+        warnings.append(f"merged-pages:{read}->{len(documents)}")
 
     _apply_master_data(documents, master, warnings)
     records, low, review_items, template, destination = excel_builder.write_ai_workbook(

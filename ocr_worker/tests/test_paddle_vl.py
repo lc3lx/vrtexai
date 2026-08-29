@@ -251,6 +251,57 @@ class PayloadTests(unittest.TestCase):
         self.assertEqual(payload["notes"], [])
 
 
+class PartyBlockTests(unittest.TestCase):
+    """A shipping document prints its parties as headings, not as ``label:``.
+
+    These blocks used to reach the workbook only because the loose page text was
+    dumped under the table. That section is gone, so the block has to be read
+    properly or it is lost — which is the opposite of what the customer asked
+    for when they asked for shipper and consignee as columns.
+    """
+
+    def test_a_heading_with_an_address_under_it_becomes_a_field(self):
+        pairs = dict(paddle_vl.party_blocks([
+            "SHIPPING MANIFEST",
+            "Shipper",
+            "Northwind Trading Ltd",
+            "12 Dock Road, Jebel Ali",
+            "Consignee",
+            "Contoso LLC",
+        ]))
+        self.assertIn("Northwind Trading Ltd", pairs["shipper"])
+        self.assertIn("Dock Road", pairs["shipper"])
+        self.assertEqual(pairs["consignee"], "Contoso LLC")
+
+    def test_a_block_stops_at_the_next_labelled_line(self):
+        pairs = dict(paddle_vl.party_blocks([
+            "Shipper",
+            "Northwind Trading Ltd",
+            "Invoice No: INV-7",
+            "Date: 2026-03-04",
+        ]))
+        self.assertEqual(pairs["shipper"], "Northwind Trading Ltd")
+
+    def test_the_arabic_consignee_is_not_read_as_the_shipper(self):
+        # المرسل إليه is the shipper's own word with one more after it.
+        pairs = dict(paddle_vl.party_blocks([
+            "المرسل إليه",
+            "شركة كونتوسو",
+        ]))
+        self.assertEqual(pairs.get("consignee"), "شركة كونتوسو")
+        self.assertNotIn("shipper", pairs)
+
+    def test_a_labelled_field_beats_a_heading_block(self):
+        payload = paddle_vl.to_payload(page(result={"parsing_res_list": [
+            {"block_label": "text", "block_content": "Shipper: Fabrikam Ltd"},
+            {"block_label": "text", "block_content": "Shipper\nNorthwind Trading Ltd"},
+        ]}))
+        self.assertEqual(payload["header"].get("shipper"), "Fabrikam Ltd")
+
+    def test_a_heading_with_nothing_under_it_yields_no_field(self):
+        self.assertEqual(paddle_vl.party_blocks(["Consignee"]), [])
+
+
 class UntouchedImageTests(unittest.TestCase):
     """The model must see the captured pixels, at full resolution.
 

@@ -5,6 +5,7 @@ const T = {
   signin:["تسجيل الدخول","Sign in"],
   signinsub:["تُوجَّه إلى واجهتك تلقائياً حسب دورك.","You are routed to your own interface by role."],
   email:["البريد الإلكتروني","Email"], pw:["كلمة المرور","Password"],
+  pw_show:["إظهار كلمة المرور","Show password"], pw_hide:["إخفاء كلمة المرور","Hide password"],
   login:["دخول","Sign in"], signout:["خروج","Sign out"],
   signing:["جارٍ الدخول…","Signing in…"],
 
@@ -29,6 +30,7 @@ const T = {
   th_file:["الملف","File"], th_status:["الحالة","Status"], th_items:["البنود","Items"],
   th_flag:["مراجعة","Review"], th_time:["الزمن","Time"], th_owner:["العميل","Customer"],
   th_name:["الاسم","Name"], th_mail:["البريد","Email"], th_used:["الاستهلاك","Usage"],
+  th_plan:["الباقة","Plan"],
   th_last:["آخر نشاط","Last activity"], th_prov:["المزوّد","Provider"],
   open:["فتح","Open"], track:["تتبّع","Track"], manage:["إدارة","Manage"],
   nojobs:["لا مهام بعد. ارفع أول مستند.","No jobs yet. Upload your first document."],
@@ -136,6 +138,16 @@ const T = {
   pw_reset:["كلمة المرور الجديدة — لن تظهر مرة أخرى.","The new password — it is not shown again."],
   close:["إغلاق","Close"],
 
+  /* Managing one account: its limit, its plan, and the two switches. */
+  pl_none:["بلا باقة","No plan"], pl_on:["مفعّلة","Active"], pl_off:["غير مفعّلة","Not activated"],
+  m_used:["المستهلك هذا الشهر","Used this month"],
+  m_plan:["الباقة","Plan"],
+  m_plan_on:["تفعيل الباقة","Activate the plan"],
+  m_apply_limit:["اضبط الحصة على حد الباقة","Set the quota to the plan's limit"],
+  m_account_on:["الحساب نشط","Account is active"],
+  m_note:["الحصة الشهرية تُضبط على الحساب وتبقى مستقلة عن سعر الباقة، فتعديل الباقة لا يقطع عميلاً في منتصف الشهر. حساب على باقة غير مفعّلة يستطيع تنظيف ملفاته ولا يستطيع استخراج مستند جديد.",
+          "The monthly quota lives on the account and stays independent of the plan's price, so editing a plan can never cut a customer off mid-month. An account on a plan that is not activated can still clean its own files, but cannot extract a new document."],
+
   /* Plans — the price list shown on the public page. */
   ap_tbl:["الباقات المعروضة على الصفحة العامة","Plans shown on the public page"],
   ap_new:["باقة جديدة","New plan"],
@@ -207,6 +219,8 @@ const T = {
 
   e_email_taken:["يوجد حساب بهذا البريد الإلكتروني.","An account with this email already exists."],
   e_customer_not_found:["العميل غير موجود.","That customer was not found."],
+  e_plan_inactive:["باقتك لم تُفعَّل بعد. اطلب من المسؤول تفعيلها. تنظيف ملفات Excel يبقى متاحاً.",
+                   "Your plan has not been activated yet. Ask your administrator to activate it. Cleaning Excel files still works."],
   e_plan_not_found:["الباقة غير موجودة.","That plan was not found."],
   e_plan_slug_taken:["يوجد باقة بهذا المعرّف. اختر معرّفاً آخر.",
                      "A plan with this slug already exists. Choose another."],
@@ -258,6 +272,13 @@ function setLang(lang) {
   document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
   document.body.dataset.lang = lang;
   document.querySelectorAll("[data-t]").forEach((el) => { el.textContent = t(el.dataset.t); });
+  // A control drawn as an icon carries its words in the label instead, and it
+  // has to follow the language switch like any other piece of text.
+  document.querySelectorAll("[data-t-label]").forEach((el) => {
+    const label = t(el.dataset.tLabel);
+    el.setAttribute("aria-label", label);
+    el.title = label;
+  });
   try { localStorage.setItem("ec-lang", lang); } catch (e) {}
   // Messages already on screen follow the toggle too. An error is remembered by
   // its code, so switching language re-says it rather than leaving the previous

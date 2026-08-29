@@ -1,17 +1,27 @@
 """Professional Excel output for the AI-led path.
 
-Two things separate this from :mod:`export`:
+Three things separate this from :mod:`export`:
 
+* **One flat table.** The document's header — shipper, consignee, invoice
+  number, dates — is written as *columns beside the line items*, repeated on
+  every row, not as a stack of label/value pairs above the table in columns A
+  and B. A sheet shaped that way is a data table: it sorts, it filters, it
+  pivots, and a row still says who shipped what after the sort. The stacked
+  form looked like the paper but was useless to work with, which is what the
+  customer's accounts office actually does with the file.
 * **Real formulas.** A line total is written as ``=B5*C5`` and a subtotal as
   ``=SUM(D5:D12)``, so the sheet recalculates when the customer edits a
   quantity. The number the model actually read is not thrown away — it is
   attached to the cell as a comment, and the cell is highlighted when the two
   disagree. That way the formula is live and the evidence is still there.
 * **Formatting.** Arial throughout, a coloured bold header band, thin borders
-  on every table cell, currency and quantity number formats, and column widths
-  measured from the content.
+  on every table cell, numbers written as numbers with currency and quantity
+  formats, text aligned to the side its own script starts from, and column
+  widths measured from the content that is actually in them.
 
-One sheet per page, one workbook per source file.
+One sheet per document, one workbook per source file. Pages of the same order
+are merged upstream (:func:`ai_extract.merge_pages`), so a five-page manifest is
+one continuous table, not five sheets each repeating the same heading.
 """
 from __future__ import annotations
 
@@ -36,6 +46,21 @@ TITLE_TEXT = "1F4E79"
 MONEY_ROLES = {"unit_price", "line_total", "discount", "tax"}
 QTY_ROLES = {"qty"}
 
+# What an empty text cell says. A field the page left blank — a shipper phone
+# nobody filled in — is written rather than skipped, so the row keeps its shape
+# and the columns underneath stay lined up. Numbers stay genuinely empty: "N/A"
+# in a money column is text, and text in the middle of a column is what stops
+# SUM and AVERAGE from being trustworthy.
+MISSING = "N/A"
+
+# Ceilings, not targets. The header of a real invoice carries a dozen fields;
+# past this it is a page of prose being pushed sideways, and a sheet two hundred
+# columns wide helps nobody.
+MAX_HEADER_COLUMNS = 20
+MAX_WIDTH = 55
+MIN_WIDTH = 10
+WRAP_AT = 45
+
 # Every word this builder puts in a cell, in both languages: (Arabic, English).
 #
 # The document chooses, not the product. An English invoice that comes back with
@@ -48,7 +73,14 @@ _TEXT: dict[str, tuple[str, str]] = {
     # header fields
     "supplier": ("المورد", "Supplier"),
     "client_name": ("العميل", "Customer"),
+    "shipper": ("المرسِل", "Shipper"),
+    "shipper_phone": ("هاتف المرسِل", "Shipper phone"),
+    "shipper_address": ("عنوان المرسِل", "Shipper address"),
+    "consignee": ("المرسَل إليه", "Consignee"),
+    "consignee_phone": ("هاتف المرسَل إليه", "Consignee phone"),
+    "consignee_address": ("عنوان المرسَل إليه", "Consignee address"),
     "invoice_number": ("رقم الفاتورة", "Invoice no."),
+    "purchase_order": ("أمر الشراء", "Purchase order"),
     "invoice_date": ("تاريخ الفاتورة", "Invoice date"),
     "due_date": ("تاريخ الاستحقاق", "Due date"),
     "tax_number": ("الرقم الضريبي", "Tax number"),
@@ -71,7 +103,6 @@ _TEXT: dict[str, tuple[str, str]] = {
     # page furniture
     "page_n": ("صفحة", "Page"),
     "read_value": ("القيمة المقروءة من الصورة", "Value read from the image"),
-    "other_text": ("ملاحظات ونصوص أخرى في الصفحة", "Notes and other text on the page"),
     "no_page_data": (
         "لم يتم استخراج أي بيانات من هذه الصفحة.",
         "No data could be extracted from this page.",
@@ -116,6 +147,20 @@ _TEXT: dict[str, tuple[str, str]] = {
 }
 
 _TOTAL_ORDER = ("subtotal", "discount", "tax_amount", "grand_total")
+
+# The order the header columns are laid out in, when the document happens to
+# carry them. Who and what first, then the references, then the dates and terms
+# — the order somebody reads a shipment in. Fields this product has no name for
+# keep their printed label and follow, in the order the page printed them.
+_HEADER_ORDER = (
+    "supplier", "shipper", "shipper_phone", "shipper_address",
+    "client_name", "consignee", "consignee_phone", "consignee_address",
+    "invoice_number", "purchase_order", "tax_number",
+    "invoice_date", "due_date", "payment_terms",
+)
+
+# Keys the item objects carry for the builder's own use, never as a column.
+_PRIVATE_ITEM_KEYS = {"review", "notes"}
 
 
 def words_for(direction: str):
@@ -204,7 +249,7 @@ def plan_columns(document: dict[str, Any]) -> list[tuple[str, str, str]]:
     present: list[str] = []
     for item in document.get("items") or []:
         for key in item:
-            if key in {"review", "notes"} or key in present:
+            if key in _PRIVATE_ITEM_KEYS or key.startswith("_") or key in present:
                 continue
             present.append(key)
     for role in order:
@@ -214,6 +259,83 @@ def plan_columns(document: dict[str, Any]) -> list[tuple[str, str, str]]:
     for field in present:
         add(field)
     return fields
+
+
+def plan_header_columns(document: dict[str, Any]) -> list[tuple[str, str]]:
+    """The header fields as ``(key, heading)`` columns beside the item detail.
+
+    The customer's complaint was precise: shipper and consignee arriving as a
+    vertical stack in columns A and B, above a table they had nothing to do
+    with. Read like that the sheet is a picture of the page; laid out as columns
+    it is a table, and the line "who sent this, to whom, on which order" travels
+    with every row through a sort or a filter.
+    """
+    say = document_words(document)
+    header = document.get("header") or {}
+    keys = [str(key).strip() for key in header if str(key).strip()]
+    known = [key for name in _HEADER_ORDER for key in keys if key.casefold() == name]
+    rest = [key for key in keys if key not in known]
+    return [
+        (key, say(key.casefold(), key))
+        for key in (known + rest)[:MAX_HEADER_COLUMNS]
+    ]
+
+
+# Headings whose digits identify something rather than measure it. A tracking
+# number that Excel helpfully turns into 1.02442E+11, or a phone number that
+# loses its leading zero, is a defect — so these columns stay text however
+# numeric they look.
+_IDENTIFIER_HEADING = re.compile(
+    r"sku|code|no\.?\b|number|ref\b|serial|\bid\b|phone|mobile|tel\b|fax|zip|postal"
+    r"|barcode|iban|account|awb|tracking"
+    r"|رقم|هاتف|جوال|كود|مرجع|حساب|بوليصة",
+    re.I,
+)
+
+# A heading that says the column holds money, when nothing else did.
+_MONEY_HEADING = re.compile(
+    r"total|amount|value|price|cost|charge|freight|fee"
+    r"|إجمالي|المجموع|قيمة|سعر|مبلغ|تكلفة|أجرة",
+    re.I,
+)
+
+
+def numeric_text_fields(
+    items: Sequence[dict[str, Any]], fields: Sequence[tuple[str, str, str]]
+) -> set[str]:
+    """Columns the reader returned as text that are really numbers.
+
+    ``qty`` and ``unit_price`` reach the sheet as numbers already, because their
+    role is known. A column the role resolver could not name — "Total Value" on
+    a manifest, "Gross Weight" — arrives as the text that was printed, and text
+    is invisible to SUM and AVERAGE. So a column is measured: if what is in it
+    parses as numbers and its heading does not say the digits are an identifier,
+    it is written numeric.
+
+    Deliberately by evidence rather than by heading alone. Every document names
+    its columns differently, and a heading match would convert an "Order No"
+    somebody called "Order Total" on the next customer's paper.
+    """
+    from verify import to_number
+
+    numeric: set[str] = set()
+    for field, heading, role in fields:
+        if role != "other" or _IDENTIFIER_HEADING.search(f"{field} {heading}"):
+            continue
+        texts = [
+            str(item.get(field)).strip()
+            for item in items
+            if item.get(field) not in (None, "")
+        ]
+        if not texts:
+            continue
+        # A leading zero carries meaning — 007 is a code, and 7 is not it.
+        if any(re.match(r"0\d", text) for text in texts):
+            continue
+        parsed = sum(1 for text in texts if to_number(text) is not None)
+        if parsed * 5 >= len(texts) * 4:
+            numeric.add(field)
+    return numeric
 
 
 ARABIC = re.compile(r"[؀-ۿݐ-ݿﭐ-﷿ﹰ-﻿]")
@@ -240,7 +362,14 @@ def reading_order(text: Any) -> int:
 
 
 def _text_alignment(text: Any, *, wrap: bool = False, vertical: str = "top"):
-    """Align a text cell to the side its own script starts from."""
+    """Align a text cell to the side its own script starts from.
+
+    Left for Latin, right for Arabic. Those are the same rule — text starts at
+    the edge its reader starts from — and it is why the alignment is decided per
+    cell: an Arabic description sitting beside an English SKU wants a different
+    edge from its neighbour. Numbers never come through here; they are right
+    aligned against the column of figures above them.
+    """
     from openpyxl.styles import Alignment
 
     order = reading_order(text)
@@ -248,8 +377,39 @@ def _text_alignment(text: Any, *, wrap: bool = False, vertical: str = "top"):
         vertical=vertical,
         wrap_text=wrap,
         readingOrder=order,
-        horizontal="right" if order == 2 else "left" if order == 1 else None,
+        horizontal="right" if order == 2 else "left",
     )
+
+
+def _as_number(value: Any) -> float | None:
+    """A cell's value as a number, or ``None`` when it is not one."""
+    from verify import to_number
+
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value or "").strip()
+    return to_number(text) if text else None
+
+
+def _shown(value: Any) -> str:
+    """What a number will look like once Excel has formatted it.
+
+    Measuring the raw ``31.0`` would give a column too narrow for the
+    ``31.00 ر.س`` the customer actually sees in it.
+    """
+    if isinstance(value, bool) or value is None:
+        return ""
+    if isinstance(value, (int, float)):
+        return f"{value:,.2f}"
+    return str(value)
+
+
+def _number_alignment(*, horizontal: str = "right"):
+    from openpyxl.styles import Alignment
+
+    return Alignment(horizontal=horizontal, vertical="top")
 
 
 def _style_cell(cell, *, border, bold: bool = False, size: int = 11) -> None:
@@ -260,8 +420,20 @@ def _style_cell(cell, *, border, bold: bool = False, size: int = 11) -> None:
 
 
 def _track(widths: dict[int, int], column: int, text: Any) -> None:
-    length = len(str(text if text is not None else ""))
-    widths[column] = max(widths.get(column, 10), min(length + 3, 60))
+    """Widen a column to fit what was just written into it.
+
+    openpyxl cannot ask Excel to auto-fit, so the fit is measured here as the
+    text is written — which is the only moment every value of a column is known.
+    Measured on the longest line rather than the whole string, because a wrapped
+    cell breaks at its newlines, and scaled up for Arabic, whose glyphs are
+    drawn wider than Latin at the same point size and would otherwise be clipped
+    by a column measured in characters.
+    """
+    value = "" if text is None else str(text)
+    longest = max((len(part) for part in value.splitlines()), default=0)
+    if ARABIC.search(value):
+        longest = int(longest * 1.15) + 1
+    widths[column] = max(widths.get(column, MIN_WIDTH), min(longest + 3, MAX_WIDTH))
 
 
 def _write_page(
@@ -273,7 +445,7 @@ def _write_page(
 ) -> tuple[int, int, list[dict[str, Any]]]:
     """Render one page. Returns (records, flagged rows, review items)."""
     from openpyxl.comments import Comment
-    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.styles import Alignment, Border, Font, Side
 
     thin = styles["thin"]
     yellow = styles["yellow"]
@@ -293,11 +465,24 @@ def _write_page(
     widths: dict[int, int] = {}
     review_items: list[dict[str, Any]] = []
     records = flagged = 0
+
+    header = document.get("header") or {}
+    header_columns = plan_header_columns(document)
     fields = plan_columns(document)
-    width = max(len(fields), 2)
+    items = list(document.get("items") or [])
+    numeric_fields = numeric_text_fields(items, fields)
+
+    # Which page a row came from, kept only when the sheet holds more than one.
+    # A merged manifest is a single table, and "page 3" is how a reviewer finds
+    # the sheet of paper a disputed row is printed on.
+    pages = [page for page in (document.get("pages") or []) if page]
+    show_page = len(pages) > 1
+    page_column = len(header_columns) + 1 if show_page else 0
+    offset = len(header_columns) + (1 if show_page else 0)
+    width = max(offset + len(fields), 2)
     row = 1
 
-    def flag(column: int, header: str, value: Any, note: str) -> None:
+    def flag(at_row: int, column: int, heading: str, value: Any, note: str) -> None:
         """Queue a cell for manual review.
 
         Only literal cells are queued. A formula cell must never enter the
@@ -307,68 +492,71 @@ def _write_page(
         review_items.append({
             "output": str(destination),
             "sheet": sheet.title,
-            "row": row,
+            "row": at_row,
             "column": column,
-            "header": header,
+            "header": heading,
             "value": "" if value is None else value,
             "confidence": "",
             "suggestion": note,
         })
 
-    # ---- title -----------------------------------------------------------
-    title = str(document.get("title") or "").strip() or source.stem
-    cell = sheet.cell(row, 1, title)
-    cell.font = Font(name=FONT_NAME, size=14, bold=True, color=TITLE_TEXT)
-    cell.alignment = Alignment(vertical="center")
-    if width > 1:
-        sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=width)
-    sheet.row_dimensions[row].height = 22
-    _track(widths, 1, title)
-    row += 1
+    def heading_cell(column: int, text: str) -> None:
+        cell = sheet.cell(row, column, text)
+        cell.font = Font(name=FONT_NAME, size=11, bold=True, color=BAND_TEXT)
+        cell.fill = band
+        cell.border = thin
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        _track(widths, column, text)
 
-    subtitle = f"{source.name} — {say('page_n')} {document.get('page', 1)}"
-    cell = sheet.cell(row, 1, subtitle)
-    cell.font = Font(name=FONT_NAME, size=9, italic=True, color="7F7F7F")
-    if width > 1:
-        sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=width)
-    row += 2
-
-    # ---- header fields ---------------------------------------------------
-    header = document.get("header") or {}
-    if header:
-        for key, value in header.items():
-            label = say(str(key).casefold(), str(key))
-            label_cell = sheet.cell(row, 1, label)
-            _style_cell(label_cell, border=thin, bold=True)
-            label_cell.fill = label_fill
-            value_cell = sheet.cell(row, 2, value)
-            _style_cell(value_cell, border=thin)
-            value_cell.alignment = _text_alignment(value, wrap=len(str(value)) > 50)
-            label_cell.alignment = _text_alignment(label)
-            _track(widths, 1, label)
-            _track(widths, 2, value)
-            row += 1
-        row += 1
-
-    # ---- item table ------------------------------------------------------
-    items = list(document.get("items") or [])
+    # ---- one heading row, and then nothing but data ----------------------
+    #
+    # No document title, no file name, no page banner. The reader lifts whatever
+    # is printed largest at the top — "YOUR LOGO", "Shipping Manifest" — and
+    # once the pages of one order are a single table, those lines are a heading
+    # stranded in the middle of the data. What the file is stays in its name and
+    # on the review sheet, which is where a spreadsheet keeps it.
+    header_row = row
+    for index, (_key, heading) in enumerate(header_columns, start=1):
+        heading_cell(index, heading)
+    if show_page:
+        heading_cell(page_column, say("page_n"))
     role_columns: dict[str, int] = {}
-    first_item_row = last_item_row = 0
-    if items and fields:
-        header_row = row
-        for index, (field, heading, role) in enumerate(fields, start=1):
-            cell = sheet.cell(row, index, heading)
-            cell.font = Font(name=FONT_NAME, size=11, bold=True, color=BAND_TEXT)
-            cell.fill = band
-            cell.border = thin
-            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            _track(widths, index, heading)
-            if role != "other" and role not in role_columns:
-                role_columns[role] = index
+    for index, (_field, heading, role) in enumerate(fields, start=offset + 1):
+        heading_cell(index, heading)
+        if role != "other" and role not in role_columns:
+            role_columns[role] = index
+    if header_columns or fields:
         sheet.row_dimensions[row].height = 20
         row += 1
-        first_item_row = row
 
+    body_start = row
+
+    def banded(cell, at_row: int) -> None:
+        # Banded rows. On a wide grid the eye loses its line between the
+        # description and the amount, and a flat table is wide by construction.
+        if stripe is not None and (at_row - body_start) % 2 == 1:
+            cell.fill = stripe
+
+    def write_header_columns(at_row: int) -> None:
+        """The document's own header fields, across one row of the table.
+
+        Repeated on every row on purpose. That is what makes the sheet a table:
+        sort it by amount, filter it to one product, paste it under last
+        month's, and each line still says who sent it and against which order.
+        """
+        for index, (key, _heading) in enumerate(header_columns, start=1):
+            value = header.get(key)
+            text = str(value).strip() if value not in (None, "") else MISSING
+            cell = sheet.cell(at_row, index, text)
+            _style_cell(cell, border=thin)
+            cell.alignment = _text_alignment(text, wrap=len(text) > WRAP_AT)
+            banded(cell, at_row)
+            _track(widths, index, text)
+
+    # ---- the table -------------------------------------------------------
+    first_item_row = last_item_row = 0
+    if items and fields:
+        first_item_row = row
         qty_column = role_columns.get("qty")
         price_column = role_columns.get("unit_price")
         total_column = role_columns.get("line_total")
@@ -378,8 +566,25 @@ def _write_page(
             reviews = item.get("review") or {}
             notes = item.get("notes") or {}
             painted = False
-            for index, (field, heading, role) in enumerate(fields, start=1):
+            write_header_columns(row)
+            if show_page:
+                cell = sheet.cell(row, page_column, item.get("_page") or pages[0])
+                _style_cell(cell, border=thin)
+                cell.alignment = _number_alignment(horizontal="center")
+                banded(cell, row)
+                _track(widths, page_column, cell.value)
+
+            for index, (field, heading, role) in enumerate(fields, start=offset + 1):
                 value = item.get(field)
+                # A number is written as a number: the customer's formulas —
+                # SUM over a column of totals, AVERAGE over quantities — see
+                # nothing at all in a cell holding the text "1,240.00".
+                numeric = role in MONEY_ROLES or role in QTY_ROLES
+                if field in numeric_fields:
+                    converted = _as_number(value)
+                    if converted is not None:
+                        value, numeric = converted, True
+
                 is_formula = False
                 if can_compute and role == "line_total":
                     qty = item.get("qty")
@@ -395,28 +600,38 @@ def _write_page(
                             cell.comment = Comment(
                                 f"{say('read_value')}: {value:,.2f}", "Vertex"
                             )
-                        _track(widths, index, f"{(value or qty * price):,.2f}")
+                        _track(widths, index, _shown(value if value is not None else qty * price))
                     else:
                         cell = sheet.cell(row, index, value)
-                        _track(widths, index, value)
+                        _track(widths, index, _shown(value))
+                elif numeric:
+                    # Left genuinely empty when it is missing. "N/A" here would
+                    # be text sitting in a column of figures, which is exactly
+                    # what makes a total stop adding up.
+                    cell = sheet.cell(row, index, value)
+                    _track(widths, index, _shown(value))
                 else:
-                    cell = sheet.cell(row, index, "" if value is None else value)
-                    _track(widths, index, value)
+                    text = str(value).strip() if value not in (None, "") else MISSING
+                    cell = sheet.cell(row, index, text)
+                    _track(widths, index, text)
 
                 _style_cell(cell, border=thin)
-                # Banded rows. On a wide grid the eye loses its line between the
-                # description and the amount, and these tables are wide by
-                # nature — this invoice carries nine columns.
-                if stripe is not None and (row - first_item_row) % 2 == 1:
-                    cell.fill = stripe
-                if role in MONEY_ROLES:
+                banded(cell, row)
+                if role in MONEY_ROLES or (
+                    numeric and role == "other" and _MONEY_HEADING.search(f"{field} {heading}")
+                ):
                     cell.number_format = currency
-                    cell.alignment = Alignment(horizontal="right")
+                    cell.alignment = _number_alignment()
                 elif role in QTY_ROLES:
                     cell.number_format = quantity_format
-                    cell.alignment = Alignment(horizontal="center")
+                    cell.alignment = _number_alignment(horizontal="center")
+                elif numeric:
+                    cell.number_format = quantity_format
+                    cell.alignment = _number_alignment()
                 else:
-                    cell.alignment = _text_alignment(value, wrap=len(str(value or "")) > 45)
+                    cell.alignment = _text_alignment(
+                        cell.value, wrap=len(str(cell.value or "")) > WRAP_AT
+                    )
 
                 note = notes.get(field) or notes.get(role)
                 if note and not is_formula:
@@ -425,10 +640,10 @@ def _write_page(
                     cell.fill = yellow
                     painted = True
                     if not is_formula:
-                        flag(index, heading, value, str(note or ""))
+                        flag(row, index, heading, cell.value, str(note or ""))
                     elif qty_column:
                         # Redirect the fix to the quantity, which is a literal.
-                        flag(qty_column, say("qty"), item.get("qty"), str(note or ""))
+                        flag(row, qty_column, say("qty"), item.get("qty"), str(note or ""))
             records += 1
             if painted:
                 flagged += 1
@@ -439,9 +654,15 @@ def _write_page(
         # flagged invoice is to sort by amount or filter to one product line,
         # and without this they have to select the range by hand every time.
         sheet.auto_filter.ref = (
-            f"{_column_letter(1)}{header_row}:{_column_letter(len(fields))}{last_item_row}"
+            f"{_column_letter(1)}{header_row}:{_column_letter(width)}{last_item_row}"
         )
         row += 1
+    elif header_columns:
+        # A page with fields but no grid — a cover sheet, a delivery note — is
+        # still one row of a table rather than a stack of pairs.
+        write_header_columns(row)
+        sheet.freeze_panes = sheet.cell(row, 1).coordinate
+        row += 2
 
     # ---- totals ----------------------------------------------------------
     totals = document.get("totals") or {}
@@ -449,7 +670,13 @@ def _write_page(
     totals_notes = document.get("totals_notes") or {}
     if totals:
         total_column = role_columns.get("line_total")
-        value_column = total_column or 2
+        # Under the column of amounts it belongs to. Without an amounts column
+        # the totals still go at the right-hand end of the item block, never
+        # into the header columns on the left, where they would read as another
+        # shipper detail.
+        value_column = total_column or (
+            offset + 2 if len(fields) >= 2 else max(2, offset + 1)
+        )
         label_column = max(1, value_column - 1)
         written: dict[str, int] = {}
         for key in _TOTAL_ORDER:
@@ -504,34 +731,21 @@ def _write_page(
                 value_cell.fill = yellow
                 flagged += 1
                 if formula is None:
-                    flag(value_column, str(label_cell.value), value, str(note or ""))
+                    flag(row, value_column, str(label_cell.value), value, str(note or ""))
             written[key] = row
             row += 1
         row += 1
 
-    # ---- notes -----------------------------------------------------------
-    notes_list = [str(note) for note in (document.get("notes") or []) if str(note).strip()]
-    if notes_list:
-        cell = sheet.cell(row, 1, say("other_text"))
-        cell.font = Font(name=FONT_NAME, size=11, bold=True, color=BAND_TEXT)
-        cell.fill = band
-        cell.border = thin
-        if width > 1:
-            sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=width)
-        row += 1
-        for note in notes_list:
-            cell = sheet.cell(row, 1, note)
-            _style_cell(cell, border=thin)
-            cell.alignment = _text_alignment(note, wrap=True)
-            if width > 1:
-                sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=width)
-            _track(widths, 1, note[:60])
-            row += 1
+    # There is deliberately no free-text section here. Everything the reader
+    # picked up outside the grid now arrives either as a header column or as a
+    # figure in the totals; whatever is left is page furniture — logos, slogans,
+    # the repeated document title — and dumping it under the table put a second,
+    # unaligned "sheet" inside the one the customer works in.
 
     if row == 1:
         sheet.cell(1, 1, say("no_page_data"))
     for column, size in widths.items():
-        sheet.column_dimensions[_column_letter(column)].width = max(10, size)
+        sheet.column_dimensions[_column_letter(column)].width = max(MIN_WIDTH, size)
 
     # Printable as it stands. These sheets get printed and passed around an
     # accounts office, and a nine-column invoice spilling onto a second sheet
@@ -542,7 +756,7 @@ def _write_page(
     sheet.sheet_properties.pageSetUpPr.fitToPage = True
     sheet.print_options.horizontalCentered = True
     if first_item_row:
-        sheet.print_title_rows = f"{first_item_row - 1}:{first_item_row - 1}"
+        sheet.print_title_rows = f"{header_row}:{header_row}"
     return records, flagged, review_items
 
 
@@ -608,7 +822,9 @@ def _write_summary(book, styles, source: Path, documents, records: int,
 
     row = band_row(row, say("source"))
     row = pair(row, say("file"), source.name)
-    row = pair(row, say("pages"), len(documents))
+    # Pages read, not sheets written. The two stopped being the same number when
+    # the pages of one order started arriving as one table.
+    row = pair(row, say("pages"), sum(len(d.get("pages") or [1]) for d in documents))
     row = pair(row, say("items_extracted"), records)
     row += 1
 

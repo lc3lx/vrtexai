@@ -21,6 +21,8 @@ class CreateCustomer(BaseModel):
     display_name: str = Field(min_length=1, max_length=120)
     organisation: str = Field(default="", max_length=160)
     monthly_quota: int = Field(default=500, ge=0, le=1_000_000)
+    plan_slug: str = Field(default="", max_length=40)
+    plan_active: bool = False
 
 
 class UpdateCustomer(BaseModel):
@@ -28,6 +30,11 @@ class UpdateCustomer(BaseModel):
     organisation: str | None = Field(default=None, max_length=160)
     monthly_quota: int | None = Field(default=None, ge=0, le=1_000_000)
     active: bool | None = None
+    # An empty slug is a real value here — it takes the account off its plan —
+    # so this one field is distinguished from "not sent" rather than dropped by
+    # ``exclude_none``.
+    plan_slug: str | None = Field(default=None, max_length=40)
+    plan_active: bool | None = None
 
 
 class CustomerOut(BaseModel):
@@ -38,6 +45,9 @@ class CustomerOut(BaseModel):
     active: bool
     monthly_quota: int
     used_this_month: int
+    plan_slug: str
+    plan_active: bool
+    plan_activated_at: datetime | None
     last_seen: datetime | None
     created_at: datetime
 
@@ -57,9 +67,27 @@ def _out(user: User) -> CustomerOut:
         active=user.active,
         monthly_quota=user.monthly_quota,
         used_this_month=user.used_this_month,
+        plan_slug=user.plan_slug,
+        plan_active=user.plan_active,
+        plan_activated_at=user.plan_activated_at,
         last_seen=user.last_seen,
         created_at=user.created_at,
     )
+
+
+async def _known_plan(slug: str) -> str:
+    """A plan slug that exists, or an empty string. Anything else is refused.
+
+    Checked rather than trusted: an account carrying a slug no plan matches
+    would show a blank plan in the console and, if the plan gate is on, be
+    unable to say why it is blocked.
+    """
+    slug = (slug or "").strip().casefold()
+    if not slug:
+        return ""
+    if await Plan.find_one(Plan.slug == slug) is None:
+        raise not_found("plan_not_found", "plan not found")
+    return slug
 
 
 @router.get("/customers", response_model=list[CustomerOut])
@@ -76,6 +104,8 @@ async def _provision_customer(
     display_name: str,
     organisation: str,
     monthly_quota: int,
+    plan_slug: str = "",
+    plan_active: bool = False,
 ) -> tuple[User, str]:
     """Create one customer account under this admin, returning it and its password.
 
@@ -88,6 +118,7 @@ async def _provision_customer(
         raise AppError(status.HTTP_409_CONFLICT, "email_taken",
                        "an account with this email already exists")
 
+    plan_slug = await _known_plan(plan_slug)
     password = generate_password()
     customer = User(
         email=email,
@@ -96,6 +127,11 @@ async def _provision_customer(
         display_name=display_name,
         organisation=organisation,
         monthly_quota=monthly_quota,
+        plan_slug=plan_slug,
+        plan_active=bool(plan_slug) and plan_active,
+        plan_activated_at=(
+            datetime.now(timezone.utc) if plan_slug and plan_active else None
+        ),
         # The tenancy link. Every job this customer creates inherits it, which
         # is what keeps one admin's customers invisible to another's.
         admin_id=str(admin.id),
@@ -123,6 +159,8 @@ async def create_customer(
         display_name=payload.display_name,
         organisation=payload.organisation,
         monthly_quota=payload.monthly_quota,
+        plan_slug=payload.plan_slug,
+        plan_active=payload.plan_active,
     )
     return CustomerCreated(**_out(customer).model_dump(), password=password)
 
@@ -135,8 +173,22 @@ async def update_customer(
     admin: User = Depends(current_admin),
 ) -> CustomerOut:
     changes = payload.model_dump(exclude_none=True)
+    if "plan_slug" in changes:
+        changes["plan_slug"] = await _known_plan(changes["plan_slug"])
+        # Taking the account off its plan cannot leave an activation behind.
+        if not changes["plan_slug"]:
+            changes["plan_active"] = False
     for field, value in changes.items():
         setattr(customer, field, value)
+    # A plan is not active until there is a plan to activate. Without this an
+    # admin could switch on an account that is on nothing, and the gate in
+    # ``create_job`` would then read as "no plan, so no restriction" — right by
+    # accident, and wrong the moment a plan is assigned.
+    if customer.plan_active and not customer.plan_slug:
+        customer.plan_active = False
+        changes["plan_active"] = False
+    if customer.plan_active and customer.plan_activated_at is None:
+        customer.plan_activated_at = datetime.now(timezone.utc)
     await customer.save()
     await AuditLog(
         actor_id=str(admin.id),
@@ -209,6 +261,8 @@ async def usage(admin: User = Depends(current_admin)) -> list[dict]:
             "used": c.used_this_month,
             "quota": c.monthly_quota,
             "active": c.active,
+            "plan_slug": c.plan_slug,
+            "plan_active": c.plan_active,
         }
         for c in customers
     ]
@@ -391,6 +445,10 @@ class ConvertLead(BaseModel):
     display_name: str = Field(default="", max_length=120)
     organisation: str = Field(default="", max_length=160)
     monthly_quota: int = Field(default=500, ge=0, le=1_000_000)
+    # Left unset, the account is put on the plan the visitor actually asked
+    # about — which the request has been carrying since the public page.
+    plan_slug: str | None = Field(default=None, max_length=40)
+    plan_active: bool = False
 
 
 def _lead_out(lead: Lead) -> dict:
@@ -467,6 +525,17 @@ async def convert_lead(
         raise AppError(status.HTTP_409_CONFLICT, "lead_converted",
                        "this request was already converted")
 
+    plan_slug = payload.plan_slug
+    if plan_slug is None:
+        # The plan the visitor asked about — but only if it is still on the
+        # price list. A plan retired since the request was sent must not be the
+        # reason a conversation that already happened cannot be recorded.
+        plan_slug = (
+            lead.plan_slug
+            if lead.plan_slug and await Plan.find_one(Plan.slug == lead.plan_slug)
+            else ""
+        )
+
     customer, password = await _provision_customer(
         admin,
         request,
@@ -474,6 +543,8 @@ async def convert_lead(
         display_name=payload.display_name or lead.full_name,
         organisation=payload.organisation,
         monthly_quota=payload.monthly_quota,
+        plan_slug=plan_slug,
+        plan_active=payload.plan_active,
     )
     lead.status = LeadStatus.CONVERTED
     if lead.contacted_at is None:

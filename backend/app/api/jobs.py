@@ -133,6 +133,15 @@ async def create_job(
             status.HTTP_403_FORBIDDEN, "customer_only", "sign in as a customer to upload"
         )
     cleaning = kind == JobKind.CLEAN
+    # A plan that has been assigned but not switched on. Only ever a gate for an
+    # account that is actually on a plan: an account with none is on no plan to
+    # activate, and every account created before plans existed is one of those.
+    if not cleaning and user.plan_slug and not user.plan_active:
+        raise AppError(
+            status.HTTP_403_FORBIDDEN,
+            "plan_inactive",
+            "Your plan has not been activated yet. Ask your administrator to activate it.",
+        )
     # No quota gate on cleaning: nothing about it costs per document, so a limit
     # on it would be a charge for nothing.
     if not cleaning and user.monthly_quota and user.quota_remaining <= 0:

@@ -104,6 +104,20 @@ class User(Document):
     used_this_month: int = 0
     quota_period: str = ""  # "YYYY-MM", so the counter resets by comparison
 
+    # The commercial plan this account is on, and whether it has been switched
+    # on. Kept as the plan's slug rather than its id so a plan that is retired
+    # and recreated does not orphan the accounts that were on it.
+    #
+    # Deliberately two fields. "Which plan" is what the customer bought; "is it
+    # active" is whether it has been paid for and turned on, and an admin needs
+    # to be able to set the first while the second is still false — that is the
+    # whole shape of taking an order. An account with no plan at all is
+    # unaffected by the second field, which is what keeps every account created
+    # before plans existed working exactly as it did.
+    plan_slug: str = ""
+    plan_active: bool = False
+    plan_activated_at: datetime | None = None
+
     failed_logins: int = 0
     locked_until: datetime | None = None
     last_seen: datetime | None = None

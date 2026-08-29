@@ -429,6 +429,98 @@ def _direction(text: str) -> str:
     return "rtl" if arabic / letters >= 0.20 else "ltr"
 
 
+# A party printed as a heading with its details underneath and no colon between
+# them — which is how nearly every shipping document sets out its shipper and
+# consignee boxes.
+_PARTY_HEADING = re.compile(
+    r"^(shipper|consignor|sender|consignee|receiver|recipient|ship\s*to|deliver\s*to"
+    r"|bill\s*to|sold\s*to|المرسل\s*إليه|المرسل|الشاحن|المستلم|المورد|العميل)"
+    r"\s*(?:details|information|info|بيانات)?\s*[:：]?$",
+    re.I,
+)
+
+# A line that is a field in its own right, and so the end of the block above it.
+_LABELLED_LINE = re.compile(r"[:：]\s*\S")
+
+# ``Label: value`` inside one run of text.
+_LABEL_SPLIT = re.compile(r"^([^:：]{2,40}?)\s*[:：]\s*(.+)$")
+
+
+def labelled_fields(
+    lines: list[str],
+) -> tuple[list[tuple[str, str]], dict[str, float]]:
+    """``Label: value`` printed in the page's running text, as fields and totals.
+
+    :func:`geometry.label_value_pairs` does this properly, from the word boxes,
+    and it is what the geometric reader uses. The VL model returns text with no
+    coordinates, so the same job is done on the text alone — the page separates
+    fields printed side by side with a run of white space, which is the one
+    signal that survives into a line of characters.
+
+    Splitting the label off first is what makes the amounts reachable. The
+    totals patterns are written to match a label, not a sentence: ``^total$``
+    recognises the word "Total" and cannot see it inside "Total: 900.00", so a
+    plainly printed grand total went unread until the two were separated.
+    """
+    from geometry import canonical_field, to_number, total_field
+
+    pairs: list[tuple[str, str]] = []
+    totals: dict[str, float] = {}
+    for line in lines:
+        for chunk in re.split(r"\s{2,}|\t|\|", line):
+            match = _LABEL_SPLIT.match(chunk.strip())
+            if not match:
+                continue
+            label, value = match.group(1).strip(), match.group(2).strip()
+            if not label or not value:
+                continue
+            name = total_field(label)
+            if name is not None:
+                amount = to_number(value)
+                if amount is not None:
+                    totals.setdefault(name, amount)
+                continue
+            pairs.append((canonical_field(label) or label, value))
+    return pairs, totals
+
+
+def party_blocks(lines: list[str], limit: int = 4) -> list[tuple[str, str]]:
+    """Address blocks that sit under a bare heading, as ``(field, value)``.
+
+    The label/value reader needs a colon to pair two pieces of text, and a
+    shipping document does not print one: it prints ``Shipper`` in bold and the
+    name, street and phone underneath. That was invisible to every pattern here
+    and survived only because the loose page text used to be dumped under the
+    table. With that section gone the block would be lost outright, so it is
+    read properly instead — the heading names the field, and the lines beneath
+    it are its value, up to the next heading or the next labelled line.
+    """
+    from geometry import canonical_field, total_field
+
+    pairs: list[tuple[str, str]] = []
+    for index, line in enumerate(lines):
+        match = _PARTY_HEADING.match(line.strip())
+        if not match:
+            continue
+        field = canonical_field(match.group(1))
+        if field is None:
+            continue
+        collected: list[str] = []
+        for follower in lines[index + 1: index + 1 + limit]:
+            text = follower.strip()
+            if (
+                not text
+                or _PARTY_HEADING.match(text)
+                or _LABELLED_LINE.search(text)
+                or total_field(text) is not None
+            ):
+                break
+            collected.append(text)
+        if collected:
+            pairs.append((field, " / ".join(collected)))
+    return pairs
+
+
 def _totals_from_lines(lines: list[str]) -> dict[str, float]:
     """Labelled amounts printed outside the grid (Subtotal / VAT / Total).
 
@@ -564,6 +656,29 @@ def to_payload(page: dict[str, Any]) -> dict[str, Any]:
             header[field] = value
         elif clean_label and len(clean_label) <= 40:
             header.setdefault(clean_label, value)
+
+    # Then the page's own running text, and last of all the heading blocks. The
+    # order is the strength of the evidence: a table that pairs a label with a
+    # value beats a label printed beside one, which beats a heading with text
+    # underneath it.
+    line_fields, line_totals = labelled_fields(lines)
+    for field, value in line_fields:
+        header.setdefault(field, value)
+    for field, value in party_blocks(lines):
+        header.setdefault(field, value)
+    for name, amount in line_totals.items():
+        totals.setdefault(name, amount)
+
+    # The currency is a property of the document, not a column of it. It is
+    # popped once above, before the header has been filled from the page text —
+    # so a page that prints "Currency: USD" in a line rather than beside a
+    # canonical label would otherwise leave the amounts unformatted and put the
+    # word in a column of its own.
+    for key in [key for key in header if str(key).strip().casefold() == "currency"]:
+        # Popped whether or not it is needed: an ``or`` here would short-circuit
+        # the pop as soon as a currency had been found and leave the column in.
+        found = str(header.pop(key) or "").strip()
+        currency = currency or found
 
     return {
         "document_type": "invoice" if (items and totals) else ("table" if items else "other"),
