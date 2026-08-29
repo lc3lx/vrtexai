@@ -72,9 +72,6 @@ Object.assign(T, {
   ld_tr2_h:["بياناتك معزولة","Your data stays yours"],
   ld_tr2_p:["كل مستند مربوط بحساب واحد، والتحقق من الملكية يتم في الخادم لا في المتصفح. لا يصل أي عميل إلى بيانات عميل آخر.",
             "Every document belongs to one account, and ownership is checked on the server, never in the browser. No customer can reach another's data."],
-  ld_tr3_h:["عربي أولاً","Arabic first"],
-  ld_tr3_p:["المنتج بُني للمستندات العربية بالخط والاتجاه والأختام والأرقام الضريبية، لا مترجَماً عن واجهة أجنبية.",
-            "Built for Arabic documents — script, direction, stamps and tax numbers — rather than translated from a foreign interface."],
 
   ld_p_eyebrow:["الباقات","Pricing"],
   ld_p_h:["اختر الخطة المناسبة لحجم أعمالك.","Choose the plan that fits your volume."],
