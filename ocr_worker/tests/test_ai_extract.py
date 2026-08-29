@@ -57,7 +57,7 @@ class ShapeTests(unittest.TestCase):
             {"description": "قلم", "qty": "2", "unit_price": "15.50", "line_total": "31.00"},
         ])
         document, blocking, _ = ai_extract.validate(broken, set())
-        self.assertTrue(any("نصاً" in message for message in blocking))
+        self.assertTrue(any("arrived as text" in message for message in blocking))
         # It is still converted, so a third failed attempt does not lose the row.
         item = document["items"][0]
         self.assertEqual(item["qty"], 2.0)
@@ -72,14 +72,14 @@ class ShapeTests(unittest.TestCase):
     def test_role_and_column_length_mismatch_is_reported(self):
         broken = payload(column_roles=["description", "qty"])
         document, blocking, _ = ai_extract.validate(broken, set())
-        self.assertTrue(any("يتساوى الطولان" in message for message in blocking))
+        self.assertTrue(any("the two must match" in message for message in blocking))
         self.assertEqual(len(document["column_roles"]), len(document["columns"]))
 
     def test_empty_extraction_is_blocking(self):
         _document, blocking, _ = ai_extract.validate(
             payload(items=[], totals={}, notes=[]), set()
         )
-        self.assertTrue(any("لم يُرجع النموذج أي بنود" in message for message in blocking))
+        self.assertTrue(any("returned no items" in message for message in blocking))
 
 
 class ArithmeticTests(unittest.TestCase):
@@ -88,7 +88,7 @@ class ArithmeticTests(unittest.TestCase):
             {"description": "قلم", "qty": 2, "unit_price": 15.5, "line_total": 34.0},
         ], totals={})
         document, blocking, _ = ai_extract.validate(broken, set())
-        self.assertTrue(any("لا يساوي الإجمالي المكتوب" in message for message in blocking))
+        self.assertTrue(any("not the printed line total" in message for message in blocking))
         item = document["items"][0]
         # All three cells are marked, because any one of them could be the misread.
         self.assertTrue(item["review"]["qty"])
@@ -98,13 +98,13 @@ class ArithmeticTests(unittest.TestCase):
     def test_items_that_do_not_sum_to_subtotal_flag_the_subtotal(self):
         broken = payload(totals={"subtotal": 99.0, "grand_total": 99.0})
         document, blocking, _ = ai_extract.validate(broken, set())
-        self.assertTrue(any("مجموع البنود" in message for message in blocking))
+        self.assertTrue(any("The items add up to" in message for message in blocking))
         self.assertTrue(document["totals_review"]["subtotal"])
 
     def test_grand_total_that_ignores_tax_is_flagged(self):
         broken = payload(totals={"subtotal": 61.0, "tax_amount": 9.15, "grand_total": 61.0})
         document, blocking, _ = ai_extract.validate(broken, set())
-        self.assertTrue(any("لا يساوي الإجمالي" in message for message in blocking))
+        self.assertTrue(any("does not equal the total" in message for message in blocking))
         self.assertTrue(document["totals_review"]["grand_total"])
 
     def test_discount_reconciles_with_either_sign(self):
@@ -117,7 +117,7 @@ class ArithmeticTests(unittest.TestCase):
                 })
                 _document, blocking, _ = ai_extract.validate(clean, set())
                 self.assertFalse(
-                    any("لا يساوي الإجمالي" in message for message in blocking),
+                    any("does not equal the total" in message for message in blocking),
                     blocking,
                 )
 
@@ -133,7 +133,7 @@ class GroundingTests(unittest.TestCase):
         # Reported, but as advice. The second reader is the weaker engine, and a
         # figure it missed is evidence about that reader, not proof the value is
         # wrong — so it annotates and never condemns the document.
-        self.assertTrue(any("غير موجود في قراءة OCR" in message for message in advisory))
+        self.assertTrue(any("is not in the OCR reading" in message for message in advisory))
         self.assertEqual(blocking, [])
         row = document["items"][1]
         self.assertTrue(row["review"]["unit_price"])
@@ -141,7 +141,7 @@ class GroundingTests(unittest.TestCase):
         # have read from a region OCR missed.
         self.assertEqual(row["unit_price"], 99.99)
         self.assertTrue(row["review"]["unit_price"])
-        self.assertIn("راجعه", row["notes"]["unit_price"])
+        self.assertIn("check it", row["notes"]["unit_price"])
 
     def test_thousands_separator_does_not_count_as_invented(self):
         seen = ai_extract.page_numbers([word("1,234.50")])

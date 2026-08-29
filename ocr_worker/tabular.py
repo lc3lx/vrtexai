@@ -31,7 +31,7 @@ def clean_tabular(source: Path, master: dict[str, list[str]], output_dir: Path) 
                 continue
             header_at = find_header_row(rows)
             if header_at > 0:
-                warnings.append(f"تم تجاهل {header_at} صف عنوان في '{title}'.")
+                warnings.append(f"Skipped {header_at} row(s) above the header in '{title}'.")
             raw_headers = [str(value or f"column_{index + 1}").strip() or f"column_{index + 1}" for index, value in enumerate(rows[header_at])]
             fields = [canonical_header(value) for value in raw_headers]
             target = output_book.create_sheet(title=str(title)[:31])
@@ -74,7 +74,7 @@ def clean_tabular(source: Path, master: dict[str, list[str]], output_dir: Path) 
         if not output_book.worksheets:
             sheet = output_book.create_sheet("Cleaned Data")
             sheet.append(["Message"])
-            sheet.append(["الملف لا يحتوي صفوفاً قابلة للتنظيف."])
+            sheet.append(["This file holds no rows that could be cleaned."])
         output_book.save(destination)
     finally:
         connection.close()
@@ -83,7 +83,7 @@ def clean_tabular(source: Path, master: dict[str, list[str]], output_dir: Path) 
         except OSError:
             pass
     if low_confidence:
-        warnings.append("صححت بيانات بالاعتماد على القوائم المحلية أو تصحيح المعرّفات؛ راجع الصفوف الصفراء.")
+        warnings.append("Some values were corrected against the local reference lists; check the highlighted rows.")
     return FileResult(
         str(source), str(destination), records=records, low_confidence=low_confidence,
         warnings=warnings or None, review_items=review_items,

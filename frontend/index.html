@@ -1,22 +1,22 @@
 <!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="en" dir="ltr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Excel Clear</title>
+<title>Vertex Excel</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="/static/styles.css">
 </head>
-<body data-lang="ar">
+<body data-lang="en">
 
 <!-- ===================== LOGIN ===================== -->
 <div class="login" id="v-login">
   <div class="loginbox">
     <div style="display:flex;align-items:center;gap:10px">
       <div class="mark"><span></span></div>
-      <div><b style="font-size:16px;font-weight:600">Excel Clear</b>
+      <div><b style="font-size:16px;font-weight:600">Vertex Excel</b>
         <small style="display:block;font-size:11.5px;color:var(--muted)" data-t="tagline"></small></div>
     </div>
     <div class="card raise"><div class="card-b" style="display:flex;flex-direction:column;gap:15px">
@@ -32,7 +32,6 @@
       </form>
     </div></div>
     <div style="display:flex;gap:8px;justify-content:center">
-      <div class="toggle"><button onclick="setLang('ar')" id="l-ar-1">عربي</button><button onclick="setLang('en')" id="l-en-1">EN</button></div>
       <div class="toggle"><button onclick="setTheme('light')" id="t-l-1" aria-label="Light">☀</button><button onclick="setTheme('dark')" id="t-d-1" aria-label="Dark">☾</button></div>
     </div>
   </div>
@@ -42,7 +41,7 @@
 <div class="shell hidden" id="v-app" data-role="customer">
   <nav class="rail">
     <div class="brand"><div class="mark"><span></span></div>
-      <div><b>Excel Clear</b><small id="brandsub"></small></div></div>
+      <div><b>Vertex Excel</b><small id="brandsub"></small></div></div>
     <div class="rolechip"><span id="rolechip"></span></div>
 
     <div id="nav-customer">
@@ -68,7 +67,6 @@
   <div class="main">
     <header class="topbar">
       <h1 id="pgtitle"></h1><div class="spacer"></div>
-      <div class="toggle"><button onclick="setLang('ar')" id="l-ar-2">عربي</button><button onclick="setLang('en')" id="l-en-2">EN</button></div>
       <div class="toggle"><button onclick="setTheme('light')" id="t-l-2" aria-label="Light">☀</button><button onclick="setTheme('dark')" id="t-d-2" aria-label="Dark">☾</button></div>
       <button class="btn btn-s" onclick="signOut()" data-t="signout"></button>
     </header>

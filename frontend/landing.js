@@ -6,21 +6,21 @@
 
 Object.assign(T, {
   ld_skip:["تخطَّ إلى المحتوى","Skip to content"],
-  ld_brandsub:["ذكاء اصطناعي للمستندات","Document AI"],
+  ld_brandsub:["ذكاء اصطناعي للمستندات","AI-Powered Invoice to Excel"],
   ld_n_services:["الخدمات","Services"], ld_n_how:["كيف تعمل","How it works"],
   ld_n_pricing:["الباقات","Pricing"],
-  ld_signin:["دخول العملاء","Customer sign in"],
+  ld_signin:["دخول","Login"],
   ld_cta:["اطلب اشتراكك","Request access"],
 
   ld_eyebrow:["شركة رائدة في الذكاء الاصطناعي","A leader in applied AI"],
   ld_h1:["من صورة فاتورة إلى جدول Excel موثّق.",
-         "From a photographed invoice to a verified Excel sheet."],
+         "AI-Powered Invoice to Excel Extraction — Fast & Reliable."],
   ld_sub:["ڤيرتكس تقرأ فواتيرك المصوّرة والورقية وملفاتك، وتنظّف جداول Excel المبعثرة، وتسلّمك ملفاً واحداً نظيفاً — كل رقم فيه له دليل في الصورة، وكل قيمة مشكوك فيها تُعلَّم ولا تُحذف.",
           "Vertex reads your photographed, scanned and paper invoices, cleans up scattered Excel sheets, and hands back one clean file — every number backed by evidence in the image, every doubtful value flagged rather than deleted."],
   ld_how_cta:["شاهد كيف تعمل","See how it works"],
   ld_chip1:["ثلاث بوابات تحقق على كل مستند","Three verification gates per document"],
   ld_chip2:["قراءة بالدقة الكاملة دون تصغير","Read at full resolution, never downscaled"],
-  ld_chip3:["عربي أولاً — لا ترجمة لاحقة","Arabic first — not a translation layer"],
+  ld_chip3:["تنظيف ملفات Excel غير محدود","Unlimited Excel file cleaning"],
 
   ld_t_eyebrow:["المشكلة والحل","The problem and the fix"],
   ld_t_h:["الورق لا يُدخَل يدوياً بعد اليوم.","Manual data entry ends here."],
@@ -323,7 +323,7 @@ function watchTilt() {
 window.refreshView = renderPlans;
 
 (function start() {
-  try { setLang(localStorage.getItem("ec-lang") || "ar"); } catch (e) { setLang("ar"); }
+  setLang("en");
   try {
     const theme = localStorage.getItem("ec-theme");
     if (theme) setTheme(theme);

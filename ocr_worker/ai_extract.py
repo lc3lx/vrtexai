@@ -108,14 +108,14 @@ def _normalise(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     unknown = sorted({role for role in roles if role and role not in ROLES})
     if unknown:
         errors.append(
-            "column_roles يحتوي أدواراً غير معروفة: "
-            + "، ".join(unknown)
-            + f" — اختر من: {', '.join(ROLES)}"
+            "column_roles holds roles that are not recognised: "
+            + ", ".join(unknown)
+            + f" — choose from: {', '.join(ROLES)}"
         )
         roles = [role if role in ROLES else "other" for role in roles]
     if columns and roles and len(columns) != len(roles):
         errors.append(
-            f"columns فيها {len(columns)} عنصراً بينما column_roles فيها {len(roles)} — يجب أن يتساوى الطولان."
+            f"columns has {len(columns)} entries but column_roles has {len(roles)} — the two must match."
         )
         roles = (roles + ["other"] * len(columns))[: len(columns)]
     if not roles:
@@ -125,16 +125,16 @@ def _normalise(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
 
     raw_items = payload.get("items")
     if not isinstance(raw_items, list):
-        errors.append("items ليست قائمة.")
+        errors.append("items is not a list.")
         raw_items = []
     if len(raw_items) > MAX_ITEMS:
-        errors.append(f"عدد البنود {len(raw_items)} يتجاوز الحد {MAX_ITEMS}.")
+        errors.append(f"{len(raw_items)} items exceeds the limit of {MAX_ITEMS}.")
         raw_items = raw_items[:MAX_ITEMS]
 
     items: list[dict[str, Any]] = []
     for number, raw in enumerate(raw_items, start=1):
         if not isinstance(raw, dict):
-            errors.append(f"البند {number} ليس كائناً.")
+            errors.append(f"Item {number} is not an object.")
             continue
         item: dict[str, Any] = {"review": {}, "notes": {}}
         for key, value in raw.items():
@@ -144,10 +144,10 @@ def _normalise(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
                 parsed, was_string = _coerce_number(value)
                 if was_string and parsed is not None:
                     errors.append(
-                        f"البند {number}: الحقل «{key}» جاء نصاً ({value!r}) — أرسله رقم JSON."
+                        f"Item {number}: field {key!r} arrived as text ({value!r}) — send it as a JSON number."
                     )
                 if was_string and parsed is None:
-                    errors.append(f"البند {number}: الحقل «{key}» قيمته غير رقمية ({value!r}).")
+                    errors.append(f"Item {number}: field {key!r} is not numeric ({value!r}).")
                 item[key] = parsed
             elif value in (None, ""):
                 item[key] = ""
@@ -161,7 +161,7 @@ def _normalise(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         key = str(key).strip()
         parsed, was_string = _coerce_number(value)
         if was_string and parsed is not None:
-            errors.append(f"totals.{key} جاء نصاً ({value!r}) — أرسله رقم JSON.")
+            errors.append(f"totals.{key} arrived as text ({value!r}) — send it as a JSON number.")
         if parsed is not None:
             totals[key] = parsed
     document["totals"] = totals
@@ -188,12 +188,12 @@ def check_arithmetic(document: dict[str, Any]) -> list[str]:
         if _close(qty * price, total):
             continue
         errors.append(
-            f"البند {number}: {qty:g} × {price:g} = {qty * price:g} ولا يساوي الإجمالي المكتوب {total:g}."
+            f"Item {number}: {qty:g} x {price:g} = {qty * price:g}, which is not the printed line total {total:g}."
         )
         for field in ("qty", "unit_price", "line_total"):
             item["review"][field] = True
         item["notes"]["line_total"] = (
-            f"الكمية × السعر ({qty:g} × {price:g}) لا تساوي الإجمالي المقروء {total:g}"
+            f"Quantity x price ({qty:g} x {price:g}) does not equal the line total read here, {total:g}"
         )
 
     totals = document.get("totals") or {}
@@ -206,11 +206,11 @@ def check_arithmetic(document: dict[str, Any]) -> list[str]:
         summed = round(sum(amounts), 2)
         if not _close(summed, subtotal, tolerance=0.05):
             errors.append(
-                f"مجموع البنود {summed:g} لا يساوي المجموع الفرعي {subtotal:g}."
+                f"The items add up to {summed:g}, which is not the subtotal {subtotal:g}."
             )
             document["totals_review"]["subtotal"] = True
             document["totals_notes"]["subtotal"] = (
-                f"مجموع البنود المقروءة {summed:g} لا يساوي المجموع الفرعي {subtotal:g}"
+                f"The items read add up to {summed:g}, not the subtotal {subtotal:g}"
             )
 
     if subtotal is not None and grand is not None:
@@ -220,18 +220,18 @@ def check_arithmetic(document: dict[str, Any]) -> list[str]:
         candidates = [base, base - abs(discount), base + discount]
         if not any(_close(value, grand, tolerance=0.05) for value in candidates):
             errors.append(
-                f"المجموع الفرعي + الضريبة ({base:g}) لا يساوي الإجمالي {grand:g}."
+                f"Subtotal plus tax ({base:g}) does not equal the total {grand:g}."
             )
             document["totals_review"]["grand_total"] = True
             document["totals_notes"]["grand_total"] = (
-                f"المجموع الفرعي + الضريبة ({base:g}) لا يساوي الإجمالي {grand:g}"
+                f"Subtotal plus tax ({base:g}) does not equal the total {grand:g}"
             )
 
     if subtotal is not None and tax is not None and totals.get("tax_rate"):
         expected = subtotal * float(totals["tax_rate"])
         if not _close(expected, tax, tolerance=0.05):
             errors.append(
-                f"نسبة الضريبة {totals['tax_rate']:g} على {subtotal:g} تعطي {expected:g} لا {tax:g}."
+                f"A tax rate of {totals['tax_rate']:g} on {subtotal:g} gives {expected:g}, not {tax:g}."
             )
     return errors
 
@@ -303,16 +303,16 @@ def check_grounding(document: dict[str, Any], seen: set[str]) -> list[str]:
             if value is None or _grounded(value, seen):
                 continue
             errors.append(
-                f"البند {number}: الرقم {value:g} في «{field}» غير موجود في قراءة OCR لهذه الصفحة."
+                f"Item {number}: the figure {value:g} in {field!r} is not in the OCR reading of this page."
             )
             item["review"][field] = True
-            item["notes"][field] = "لم يُعثر على هذا الرقم في القراءة الضوئية للصفحة — راجعه"
+            item["notes"][field] = "This figure was not found in the independent reading of the page — check it"
     for field, value in (document.get("totals") or {}).items():
         if field == "tax_rate" or value is None or _grounded(value, seen):
             continue
-        errors.append(f"totals.{field}: الرقم {value:g} غير موجود في قراءة OCR لهذه الصفحة.")
+        errors.append(f"totals.{field}: the figure {value:g} is not in the OCR reading of this page.")
         document["totals_review"][field] = True
-        document["totals_notes"][field] = "لم يُعثر على هذا الرقم في القراءة الضوئية للصفحة — راجعه"
+        document["totals_notes"][field] = "This figure was not found in the independent reading of the page — check it"
     return errors
 
 
@@ -341,7 +341,7 @@ def validate(
     grounding_errors = check_grounding(document, seen)
     blocking = list(shape_errors) + list(arithmetic_errors)
     if not document.get("items") and not document.get("notes"):
-        blocking.append("لم يُرجع النموذج أي بنود ولا أي نص من الصفحة.")
+        blocking.append("The model returned no items and no text from the page.")
     return document, blocking, grounding_errors
 
 
@@ -366,8 +366,8 @@ def read_page_document(
 
     for number in range(1, MAX_READ_ATTEMPTS + 1):
         emit(
-            f"صفحة {page}: قراءة بنموذج PaddleOCR-VL المحلي"
-            + (f" (محاولة {number} من {MAX_READ_ATTEMPTS})" if number > 1 else "")
+            f"Page {page}: reading with the local PaddleOCR-VL model"
+            + (f" (attempt {number} of {MAX_READ_ATTEMPTS})" if number > 1 else "")
             + "…"
         )
         try:
@@ -387,8 +387,8 @@ def read_page_document(
         return document, notes
 
     raise RuntimeError(
-        f"تعذّر الحصول على استخراج صالح من النموذج المحلي: {last_error}"
-        if last_error else "تعذّر الحصول على استخراج صالح من النموذج المحلي."
+        f"No valid extraction could be obtained from the local model: {last_error}"
+        if last_error else "No valid extraction could be obtained from the local model."
     )
 
 
@@ -435,18 +435,18 @@ def analyze(source: Path, master: dict[str, list[str]], output_dir: Path) -> Fil
         documents.append(document)
         del image
         if page >= MAX_PAGES:
-            warnings.append(f"توقف بعد {MAX_PAGES} صفحة.")
+            warnings.append(f"Stopped after {MAX_PAGES} pages.")
             break
 
     if not documents:
-        raise RuntimeError("لم يتم قراءة أي صفحة من الملف.")
+        raise RuntimeError("No page in this file could be read.")
 
     _apply_master_data(documents, master, warnings)
     records, low, review_items, template, destination = excel_builder.write_ai_workbook(
         destination, source, documents
     )
     if low:
-        warnings.append("توجد خلايا صفراء تتطلب مراجعة.")
+        warnings.append("Some cells are highlighted and need a human check.")
     warnings.append("ai-model:PaddleOCR-VL")
     return FileResult(
         str(source),
@@ -478,7 +478,7 @@ def _apply_master_data(
                 if was_changed:
                     item[field] = matched
                     item["review"][field] = True
-                    item["notes"][field] = "طوبق مع قوائم المطابقة المحلية"
+                    item["notes"][field] = "Matched against the local reference lists"
                     changed += 1
     if changed:
         warnings.append(f"master-data:{changed}")

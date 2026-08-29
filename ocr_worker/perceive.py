@@ -117,7 +117,7 @@ def _engine(script: str):
         # model directory is supplied. Customer machines must never do that.
         paddleocr_mod.maybe_download = lambda model_dir, url: None
     except Exception as error:
-        _ENGINE_ERROR = f"PaddleOCR غير متاح: {type(error).__name__}: {error}"
+        _ENGINE_ERROR = f"PaddleOCR unavailable: {type(error).__name__}: {error}"
         raise RuntimeError(_ENGINE_ERROR) from error
 
     if script == "ar":

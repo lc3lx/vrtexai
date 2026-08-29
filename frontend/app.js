@@ -684,6 +684,17 @@ async function renderResult() {
   // model behind it. Reporting those would be reporting work that never ran.
   const cleaning = job.kind === "clean";
 
+  // The reader records two different things under one name. Some warnings are
+  // for the customer ("2 rows above the header were skipped"); the rest are
+  // engine diagnostics — "perceive:tesseract-fallback", a model's complaint
+  // about its own JSON. Showing those in a coloured box tells someone their
+  // invoice went wrong when it did not, so they are folded away instead.
+  const isDiagnostic = (line) =>
+    /^[a-z0-9_.-]+:/i.test(String(line)) || /^(Item \d+:|totals\.|columns |column_roles )/.test(String(line));
+  const warnings = job.warnings || [];
+  const noteworthy = warnings.filter((line) => !isDiagnostic(line));
+  const diagnostics = warnings.filter(isDiagnostic);
+
   const flags = job.flags && job.flags.length
     ? `<div style="display:flex;flex-direction:column;gap:9px">
          <div class="eyebrow">${esc(t(cleaning ? "needs_clean" : "needs"))}</div>
@@ -708,8 +719,11 @@ async function renderResult() {
     <div class="card-b" style="display:flex;flex-direction:column;gap:16px">
       ${flags}
       <div>${facts}</div>
-      ${job.warnings && job.warnings.length
-        ? `<div class="alert a-flag">${job.warnings.map(esc).join("<br>")}</div>` : ""}
+      ${noteworthy.length
+        ? `<div class="alert a-flag">${noteworthy.map(esc).join("<br>")}</div>` : ""}
+      ${diagnostics.length ? `<details class="detail">
+          <summary>${esc(t("e_detail"))}</summary>
+          <pre class="mono">${diagnostics.map(esc).join("\n")}</pre></details>` : ""}
       <div class="alert a-bad hidden" id="dlErr"></div>
       ${job.has_result
         ? `<button class="btn btn-p btn-w" onclick="downloadResult('${job.id}')">${esc(t("dl"))}</button>` : ""}
@@ -1101,7 +1115,7 @@ async function convertLead(id) {
 /* ---------------- boot ---------------- */
 (function () {
   let theme = null, lang = null;
-  try { theme = localStorage.getItem("ec-theme"); lang = localStorage.getItem("ec-lang"); } catch (e) {}
+  try { theme = localStorage.getItem("ec-theme"); } catch (e) {}
   if (theme) setTheme(theme);
   else {
     const dark = window.matchMedia && window.matchMedia("(prefers-color-scheme:dark)").matches;
@@ -1111,7 +1125,8 @@ async function convertLead(id) {
       if (d) d.setAttribute("aria-pressed", String(dark));
     });
   }
-  setLang(lang === "en" ? "en" : "ar");
+  // English, whatever a browser remembers from when the toggle existed.
+  setLang("en");
 
   session = loadSession();
   if (session) enterApp();

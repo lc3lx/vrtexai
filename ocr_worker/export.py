@@ -104,7 +104,7 @@ def write_generic_tables(
     if not book.worksheets:
         sheet = book.create_sheet(title="Extracted")
         sheet.append(["Message"])
-        sheet.append(["لم يتم استخراج صفوف من هذا الملف."])
+        sheet.append(["No rows could be extracted from this file."])
     destination = _save_workbook(book, destination)
     for item in review_items:
         item["output"] = str(destination)

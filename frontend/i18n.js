@@ -243,21 +243,21 @@ const T = {
             "If the model service is unreachable, processing falls back to the local reader and all three gates still run."],
 };
 
-let LANG = "ar";
+/* The interface is English. The Arabic column of every pair above is kept
+   deliberately rather than deleted: the product is sold into an Arabic market
+   and the translations are done work, so turning Arabic back on is a one-line
+   change here instead of a rewrite. Nothing offers the switch to a visitor. */
+let LANG = "en";
 const idx = () => (LANG === "ar" ? 0 : 1);
 const t = (key) => (T[key] ? T[key][idx()] : key);
 
 function setLang(lang) {
-  LANG = lang;
+  LANG = lang === "ar" ? "ar" : "en";
+  lang = LANG;
   document.documentElement.lang = lang;
   document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
   document.body.dataset.lang = lang;
   document.querySelectorAll("[data-t]").forEach((el) => { el.textContent = t(el.dataset.t); });
-  ["1", "2"].forEach((n) => {
-    const ar = document.getElementById("l-ar-" + n), en = document.getElementById("l-en-" + n);
-    if (ar) ar.setAttribute("aria-pressed", String(lang === "ar"));
-    if (en) en.setAttribute("aria-pressed", String(lang === "en"));
-  });
   try { localStorage.setItem("ec-lang", lang); } catch (e) {}
   // Messages already on screen follow the toggle too. An error is remembered by
   // its code, so switching language re-says it rather than leaving the previous
