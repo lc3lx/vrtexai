@@ -166,5 +166,71 @@ class ErrorClassificationTests(unittest.TestCase):
         self.assertIsInstance(self.classify("something went wrong"), AIFailed)
 
 
+class TruncationTests(unittest.TestCase):
+    """A reading that ran out of room is the top of a page, not a short page."""
+
+    def _provider(self):
+        from app.services.ai_provider import OpenRouterProvider
+
+        return OpenRouterProvider("test-key", "some/model", max_tokens=64)
+
+    def _answer(self, finish_reason: str):
+        import httpx
+
+        from app.services import ai_provider
+
+        body = {
+            "choices": [{
+                "message": {"content": INVOICE_HTML},
+                "finish_reason": finish_reason,
+            }],
+            "usage": {},
+        }
+        original = httpx.post
+
+        def fake_post(*_args, **_kwargs):
+            return httpx.Response(200, json=body, request=httpx.Request("POST", "http://t"))
+
+        httpx.post = fake_post
+        self.addCleanup(lambda: setattr(httpx, "post", original))
+        return ai_provider
+
+    def test_a_page_cut_off_at_the_token_limit_is_not_accepted(self):
+        # Silently keeping it writes half an invoice into the workbook, which is
+        # the one outcome worse than failing.
+        ai_provider = self._answer("length")
+        with self.assertRaises(ai_provider.AIUnavailable) as caught:
+            self._provider()._read_with(Path(__file__), "some/model")
+        self.assertIn("unfinished", str(caught.exception))
+
+    def test_a_complete_page_is_accepted(self):
+        self._answer("stop")
+        outcome = self._provider()._read_with(Path(__file__), "some/model")
+        self.assertTrue(outcome.pages[0].result["parsing_res_list"])
+
+    def test_the_request_asks_for_enough_room_for_a_whole_page(self):
+        import httpx
+
+        from app.services import ai_provider
+
+        seen: dict = {}
+        original = httpx.post
+
+        def fake_post(*_args, **kwargs):
+            seen.update(kwargs.get("json") or {})
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": INVOICE_HTML},
+                                   "finish_reason": "stop"}]},
+                request=httpx.Request("POST", "http://t"),
+            )
+
+        httpx.post = fake_post
+        self.addCleanup(lambda: setattr(httpx, "post", original))
+        ai_provider.OpenRouterProvider("k", "m")._read_with(Path(__file__), "m")
+        self.assertGreaterEqual(seen.get("max_tokens", 0), 4000)
+        self.assertEqual(seen.get("temperature"), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

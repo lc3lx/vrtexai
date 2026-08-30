@@ -94,6 +94,12 @@ class Settings:
             m.strip() for m in os.environ.get("OPENROUTER_FALLBACK_MODELS", "").split(",")
             if m.strip()
         )
+        # Room for a whole page of invoice transcribed as HTML. Too low and the
+        # answer stops mid-table with no error, which reads as a page that ended
+        # early rather than one that was cut off.
+        self.openrouter_max_tokens: int = max(
+            1000, int(os.environ.get("OPENROUTER_MAX_TOKENS", "8000") or 8000)
+        )
         self.ai_service_url: str = os.environ.get("AI_SERVICE_URL", "").strip()
         # The shared secret this backend presents to the GPU service. Named for
         # what it is, not for whoever happens to host the service today —

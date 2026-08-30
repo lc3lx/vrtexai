@@ -331,7 +331,7 @@ class OpenRouterProvider(AIProvider):
 
     def __init__(self, api_key: str, model: str, timeout: float = 300.0,
                  site: str = "", title: str = "Excel Clear",
-                 alternates: tuple[str, ...] = ()) -> None:
+                 alternates: tuple[str, ...] = (), max_tokens: int = 8000) -> None:
         if not api_key:
             raise ValueError("OPENROUTER_API_KEY is empty but AI_PROVIDER is 'openrouter'")
         self._key = api_key
@@ -339,6 +339,7 @@ class OpenRouterProvider(AIProvider):
         self._timeout = timeout
         self._site = site
         self._title = title
+        self._max_tokens = max_tokens
         # Tried in order when the preferred model is busy or out of credit.
         # A second hosted model answers in seconds; the local reader takes
         # minutes, so it is worth asking two or three before giving up on the
@@ -415,6 +416,12 @@ class OpenRouterProvider(AIProvider):
             # Transcription, not composition: sampling variety here would mean a
             # different reading of the same invoice on every attempt.
             "temperature": 0,
+            # A full page of invoice, transcribed as HTML, runs to thousands of
+            # tokens. Left unset, the provider's own default applies, and on a
+            # long document the answer simply stops — mid-table, with no error.
+            # The bottom of the invoice then goes missing in a way that looks
+            # exactly like a page that had nothing on it.
+            "max_tokens": self._max_tokens,
         }
         try:
             response = httpx.post(self.ENDPOINT, headers=self._headers(),
@@ -436,9 +443,20 @@ class OpenRouterProvider(AIProvider):
         if body.get("error"):
             raise _classify_openrouter_error(body["error"])
         try:
-            content = body["choices"][0]["message"]["content"]
+            choice = body["choices"][0]
+            content = choice["message"]["content"]
         except (KeyError, IndexError, TypeError) as error:
             raise AIFailed("OpenRouter returned no message content") from error
+
+        # A transcription that ran out of room is not a short page — it is the
+        # top of a page, and the rest is gone. Treated as a failure so another
+        # model, or the local reader, gets the document; half an invoice written
+        # confidently into a workbook is the worst outcome available.
+        if str(choice.get("finish_reason") or "").casefold() in {"length", "max_tokens"}:
+            raise AIUnavailable(
+                f"{model} stopped at the {self._max_tokens}-token limit with the page "
+                "unfinished; the reading would have been missing its lower part"
+            )
         if isinstance(content, list):  # some models answer in parts
             content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
         if not str(content).strip():
@@ -555,6 +573,7 @@ def build_provider(settings) -> AIProvider:
             settings.openrouter_key, settings.openrouter_model,
             settings.ai_timeout_seconds, settings.openrouter_site,
             alternates=getattr(settings, "openrouter_alternates", ()),
+            max_tokens=getattr(settings, "openrouter_max_tokens", 8000),
         )
     elif choice == "http":
         remote = HttpProvider(
