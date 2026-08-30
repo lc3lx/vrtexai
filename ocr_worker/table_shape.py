@@ -207,21 +207,49 @@ def as_number(text: Any) -> float | None:
 # "Subtotal: 820.00" and wrong for asking whether a column is numeric — a
 # description reading "SAKAR GAS STONE 1," would otherwise count as the number 1
 # and take the whole column with it.
-_DECORATION = re.compile(r"^[\s(\[]*[-+]?\s*[$€£¥₹]?\s*|\s*[%]?\s*[)\]]*$")
-_ONLY_A_NUMBER = re.compile(r"^\d[\d,٬\s]*(?:[.٫]\d+)?$")
+# The currency a Gulf invoice prints in every money cell — "AED 25 000" — is
+# part of the decoration, not part of the number. Listed rather than matched as
+# "two to four letters", which would read "Dell 5664" as the number 5664 and
+# turn a monitor into an amount.
+_CODES = (
+    "AED|SAR|QAR|KWD|BHD|OMR|JOD|EGP|IQD|LYD|TND|MAD|DZD|SYP|LBP|YER|SDG"
+    "|USD|EUR|GBP|CHF|CAD|AUD|JPY|CNY|INR|PKR|TRY|RUB"
+)
+_MARKS = r"[$€£¥₹﷼]|ر\.?\s?س|د\.?\s?إ|ر\.?\s?ق|د\.?\s?ك|ج\.?\s?م|د\.?\s?أ|د\.?\s?ب|ر\.?\s?ع"
+_WORDS = r"درهم|ريال|دينار|جنيه|ليرة|دولار|يورو"
+_CURRENCY = rf"(?:{_CODES}|{_MARKS}|{_WORDS})"
+
 _ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+_MONEY = re.compile(
+    rf"^[\s(\[]*(?:{_CURRENCY}\s*)?[-+]?\s*"
+    rf"(\d[\d,٬\s]*(?:[.٫]\d+)?)"
+    rf"\s*(?:{_CURRENCY})?\s*%?\s*[)\]]*$",
+    re.I,
+)
 
 
 def numeric_cell(text: Any) -> float | None:
-    """The value of a cell that holds a number and nothing else."""
+    """The value of a cell that holds a number and nothing else.
+
+    Deliberately stricter than ``verify.to_number``, which finds a number
+    anywhere in a string — right for pulling an amount out of "Subtotal: 820.00"
+    and wrong for deciding whether a column is numeric: a description reading
+    "SAKAR GAS STONE 1," would otherwise count as the number 1 and take its
+    whole column with it.
+
+    A currency the page prints beside the figure is allowed, because a column of
+    "AED 25000" is a column of money however it is written. Without that, every
+    money column on a Gulf invoice measured as non-numeric, no column could be
+    the line total, and the sheet came back with no prices and no totals.
+    """
     body = str(text or "").strip().translate(_ARABIC_DIGITS)
     if not body:
         return None
-    body = _DECORATION.sub("", body).strip()
-    if not _ONLY_A_NUMBER.match(body):
+    match = _MONEY.match(body)
+    if not match:
         return None
     try:
-        return float(re.sub(r"[,٬\s]", "", body).replace("٫", "."))
+        return float(re.sub(r"[,٬\s]", "", match.group(1)).replace("٫", "."))
     except ValueError:
         return None
 
@@ -288,9 +316,25 @@ def split_header(grid: Grid, limit: int = 3) -> tuple[list[str], list[list[Cell]
     above "Stock" — and reading only the first line gives every such column the
     same useless name.
     """
+    # A table with no figures anywhere is not a data table with a heading — it
+    # is a box of label/value pairs, which is how invoices print the customer
+    # and payment details. Reading its first three rows as a stacked heading
+    # collapsed the whole box into one row of column names.
+    if not any(numeric_cell(cell.text) is not None for row in grid.cells for cell in row):
+        return [], list(grid.cells)
+
     band = 0
     while band < min(limit, grid.height) and looks_like_header(grid.cells[band]):
         band += 1
+    # The band may not swallow the table. And a heading only stacks over more
+    # than one row when real data follows it, so a run of text rows above the
+    # figures is not folded into the column names.
+    if band >= grid.height:
+        return [], list(grid.cells)
+    while band > 1 and not any(
+        numeric_cell(cell.text) is not None for cell in grid.cells[band]
+    ):
+        band -= 1
     if band == 0:
         return [], list(grid.cells)
 
@@ -365,15 +409,28 @@ def classify_row(row: Sequence[Cell]) -> tuple[str, str, float | None]:
             return SECTION, cell.text, None
         return ITEM, "", None
 
-    amounts = [numeric_cell(cell.text) for _index, cell in filled]
-    values = [value for value in amounts if value is not None]
+    values = row_amounts(row)
     words = [cell for _index, cell in filled if numeric_cell(cell.text) is None]
-    if len(values) == 1 and len(words) == 1:
-        # The label has to be one the totals vocabulary claims. Without that
-        # test a two-column table of measurements would be read as totals.
-        if totals_label(words[0].text) is not None:
-            return TOTAL, words[0].text, values[0]
+    # One label the totals vocabulary claims, and nothing else but figures. The
+    # count of figures is deliberately not fixed at one: an invoice's "مجموع"
+    # line carries the quantity total, the taxable total and the amount total,
+    # each under its own column, and demanding a single amount made that row an
+    # eleventh product.
+    if len(words) == 1 and values and totals_label(words[0].text) is not None:
+        return TOTAL, words[0].text, values[0][1] if len(values) == 1 else None
     return ITEM, "", None
+
+
+def row_amounts(row: Sequence[Cell]) -> list[tuple[int, float]]:
+    """Every figure in a row, with the column it sits in."""
+    found: list[tuple[int, float]] = []
+    for index, cell in enumerate(row):
+        if not cell.filled:
+            continue
+        value = numeric_cell(cell.text)
+        if value is not None:
+            found.append((index, value))
+    return found
 
 
 # --------------------------------------------------------------------------
@@ -729,32 +786,62 @@ def continues(first: Grid, second: Grid) -> bool:
     return _header_texts(second.cells[0]) == _header_texts(first.cells[0])
 
 
-def assemble(grids: Sequence[Grid]) -> tuple[Grid, list[Grid], list[Grid]]:
-    """Sort the page's tables into ``(items, totals, other)``.
+# What a table on the page turned out to be.
+ITEMS_GRID = "items"
+MORE_GRID = "more"      # a continuation of the item grid
+TOTALS_GRID = "totals"
+OTHER_GRID = "other"
+
+
+def grid_kinds(grids: Sequence[Grid]) -> list[str]:
+    """What each table on the page is, one answer per table, in page order.
+
+    Returned separately from :func:`assemble` so a caller that is reproducing
+    the page — rather than extracting from it — can still say where each table
+    belongs without re-deciding any of this for itself.
 
     Order is the only geometry available: the transcribing path rebuilds blocks
     from HTML and carries no coordinates, so tables are joined by structure and
     document order rather than by where they sit on the page.
     """
-    usable = [grid for grid in grids if grid and grid.height]
-    totals = [grid for grid in usable if is_totals_grid(grid)]
-    rest = [grid for grid in usable if not is_totals_grid(grid)]
+    kinds = [OTHER_GRID] * len(grids)
+    usable = [index for index, grid in enumerate(grids) if grid and grid.height]
+    for index in usable:
+        if is_totals_grid(grids[index]):
+            kinds[index] = TOTALS_GRID
+    rest = [index for index in usable if kinds[index] != TOTALS_GRID]
     if not rest:
-        return Grid(), totals, []
+        return kinds
 
     # Compared by position, never by value: two tables with identical contents
     # are still two tables, and identity is the only thing that says which.
-    chosen = max(range(len(rest)), key=lambda index: (rest[index].height, rest[index].width))
-    items = rest[chosen]
-    merged = Grid([list(row) for row in items.cells])
-    others = list(rest[:chosen])
-    for grid in rest[chosen + 1:]:
-        if continues(items, grid):
-            body = grid.cells[1:] if looks_like_header(grid.cells[0]) else grid.cells
-            merged.cells.extend(list(row) for row in body)
-        else:
+    chosen = max(rest, key=lambda index: (grids[index].height, grids[index].width))
+    kinds[chosen] = ITEMS_GRID
+    for index in rest:
+        if index > chosen and continues(grids[chosen], grids[index]):
+            kinds[index] = MORE_GRID
+    return kinds
+
+
+def assemble(grids: Sequence[Grid]) -> tuple[Grid, list[Grid], list[Grid]]:
+    """Sort the page's tables into ``(items, totals, other)``."""
+    kinds = grid_kinds(grids)
+    items = Grid()
+    totals: list[Grid] = []
+    others: list[Grid] = []
+    for index, grid in enumerate(grids):
+        kind = kinds[index]
+        if kind == ITEMS_GRID:
+            items = Grid([list(row) for row in grid.cells])
+        elif kind == TOTALS_GRID:
+            totals.append(grid)
+        elif kind == OTHER_GRID and grid and grid.height:
             others.append(grid)
-    return merged, totals, others
+    for index, grid in enumerate(grids):
+        if kinds[index] == MORE_GRID:
+            body = grid.cells[1:] if looks_like_header(grid.cells[0]) else grid.cells
+            items.cells.extend(list(row) for row in body)
+    return items, totals, others
 
 
 def read_totals(grids: Sequence[Grid]) -> list[tuple[str, float]]:
@@ -783,7 +870,9 @@ def reconcile_totals(stated: Sequence[tuple[str, float]]) -> dict[str, float]:
     buckets: dict[str, list[float]] = {}
     for label, amount in stated:
         name = totals_label(label)
-        if name:
+        # A row whose amounts could not be reduced to one figure arrives with
+        # ``None``; it is resolved against the columns instead, by the caller.
+        if name and amount is not None:
             buckets.setdefault(name, []).append(amount)
 
     totals: dict[str, float] = {}

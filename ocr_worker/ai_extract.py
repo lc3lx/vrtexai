@@ -98,13 +98,22 @@ def _normalise(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
             continue
         document["header"][str(key).strip()] = str(value).strip()
 
-    # The reader's loose page text does not travel any further. Everything in it
-    # that names something — a field, a party, an amount — has already been
-    # lifted into ``header`` and ``totals`` by :mod:`paddle_vl`; what remains is
-    # the logo line, the document title and the address block already captured
-    # beside its own label. Written under the table it became a second,
-    # unaligned document inside the customer's sheet, which is what they asked
-    # us to take out.
+    # The page itself, block by block, exactly as the reader met it. This is
+    # what the workbook reproduces; ``header``, ``items`` and ``totals`` beside
+    # it are the *interpretation*, used for the arithmetic, the formulas and the
+    # data sheet. Keeping the two apart is what lets the customer have both a
+    # faithful copy of their invoice and a table they can calculate with.
+    document["sections"] = [
+        section for section in (payload.get("sections") or [])
+        if isinstance(section, dict) and section.get("kind")
+    ]
+    # The footing rows of the item table, exactly as printed. Their figures have
+    # already been banked in ``totals``; these are kept so the sheet can show
+    # the line the page actually prints under its table.
+    document["item_totals"] = [
+        row for row in (payload.get("item_totals") or [])
+        if isinstance(row, dict) and row.get("values")
+    ]
 
     columns = [str(name).strip() for name in (payload.get("columns") or [])]
     roles = [str(role).strip().casefold() for role in (payload.get("column_roles") or [])]
@@ -442,6 +451,14 @@ def _absorb(base: dict[str, Any], page: dict[str, Any]) -> None:
     # The last page to state a total is the one that means it: an earlier page
     # carries a running figure, the last carries the amount due.
     base.setdefault("totals", {}).update(page.get("totals") or {})
+    # The later page's own blocks follow the earlier page's, which is the order
+    # they were printed in — a continuation sheet's notes and signatures belong
+    # after the goods, not interleaved with them.
+    base.setdefault("sections", []).extend(
+        section for section in (page.get("sections") or [])
+        # The item table is written once, from every page's rows together.
+        if section.get("kind") not in {"items", "totals"}
+    )
     if not base.get("currency"):
         base["currency"] = page.get("currency") or ""
     if not base.get("columns"):

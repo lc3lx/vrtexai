@@ -82,32 +82,57 @@ class WorkbookCase(unittest.TestCase):
         self.destination = result[4]
         self.book = load_workbook(self.destination)
         self.addCleanup(self.book.close)
-        # The workbook opens on a review summary, so the document sheets start
-        # at index 1. Found by the name the builder gives it in this document's
-        # own language — an English document's front sheet is called "Review" —
-        # and asserted to be first, so a future sheet added at the front does
-        # not silently point every assertion at it.
-        expected = excel_builder.words_for(
+        # Three kinds of sheet, in the order the customer meets them: the page
+        # reproduced as printed, then the same line items as a flat table, then
+        # the review summary. Found by the names the builder gives them in the
+        # document's own language, so a sheet added later cannot silently point
+        # every assertion somewhere else.
+        say = excel_builder.words_for(
             str((list(documents) or [document()])[0].get("direction") or "ltr")
-        )("review")
-        self.summary = self.book.worksheets[0]
-        self.assertEqual(self.summary.title, expected)
-        self.pages = self.book.worksheets[1:]
-        self.sheet = self.pages[0]
+        )
+        self.summary = self.book[say("review")]
+        self.assertIs(self.summary, self.book.worksheets[-1])
+        data_title = say("data_sheet")
+        self.data = self.book[data_title] if data_title in self.book.sheetnames else None
+        self.pages = [
+            worksheet for worksheet in self.book.worksheets
+            if worksheet is not self.summary
+            and not worksheet.title.startswith(data_title[:28])
+        ]
+        # ``document`` is the page as printed; ``sheet`` is the flat data table,
+        # which is what most of these assertions are about.
+        self.document = self.pages[0]
+        self.assertIs(self.document, self.book.worksheets[0])
+        self.sheet = self.data if self.data is not None else self.document
         return self.sheet
 
     # The heading row is row 1: no title, no file name, no page banner above it.
     HEADING_ROW = 1
 
-    def column(self, heading: str) -> int:
-        """The column a heading sits in — never a hard-coded letter."""
-        for cell in self.sheet[self.HEADING_ROW]:
-            if isinstance(cell.value, str) and cell.value.strip() == heading:
-                return cell.column
+    def column(self, heading: str, sheet=None) -> int:
+        """The column a heading sits in — never a hard-coded letter.
+
+        Searched over the whole sheet rather than the first row: the page sheet
+        reproduces whatever the document printed above its table, so the item
+        headings are wherever the page put them.
+        """
+        sheet = sheet if sheet is not None else self.sheet
+        for row in sheet.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str) and cell.value.strip() == heading:
+                    return cell.column
         raise AssertionError(f"لا عمود بعنوان «{heading}»")
 
-    def find_row(self, text: str) -> int:
-        for row in self.sheet.iter_rows():
+    def item_row(self, number: int) -> int:
+        """The row the nth item sits on in the page sheet.
+
+        Found rather than counted: the page sheet reproduces whatever blocks the
+        document had above its table, so the table does not start at a fixed row.
+        """
+        return self.find_row("الوصف", self.document) + number
+
+    def find_row(self, text: str, sheet=None) -> int:
+        for row in (sheet if sheet is not None else self.sheet).iter_rows():
             for cell in row:
                 if isinstance(cell.value, str) and cell.value.strip() == text:
                     return cell.row
@@ -163,9 +188,11 @@ class FlatTableTests(WorkbookCase):
         self.assertNotIn("YOUR LOGO", page)
         self.assertNotIn("ملاحظات", page)
 
-    def test_a_document_with_no_items_still_writes_its_header_row(self):
-        sheet = self.build(document(items=[], totals={}))
-        self.assertEqual(sheet.cell(2, self.column("المورد")).value, "شركة الأفق")
+    def test_a_document_with_no_items_still_writes_its_fields(self):
+        # No line items means no data sheet, but the page still has to appear.
+        self.build(document(items=[], totals={}))
+        self.assertIsNone(self.data)
+        self.assertIn("شركة الأفق", self.text_of(self.document))
 
     def test_a_merged_document_says_which_page_each_row_came_from(self):
         merged = document(pages=[1, 2], items=[
@@ -537,28 +564,33 @@ class FormattingTests(WorkbookCase):
 
 class ReviewTests(WorkbookCase):
     def test_a_flagged_cell_is_yellow_and_queued(self):
+        """The queue points into the page sheet — the one a reviewer works in."""
         flagged = document()
         flagged["items"][1]["review"]["qty"] = True
         flagged["items"][1]["notes"]["qty"] = "راجع الكمية"
-        sheet = self.build(flagged)
-        qty = self.column("الكمية")
-        self.assertIn("FFF2CC", str(sheet.cell(3, qty).fill.fgColor.rgb))
+        self.build(flagged)
+        qty = self.column("الكمية", self.document)
+        second = self.item_row(2)
+        self.assertIn("FFF2CC", str(self.document.cell(second, qty).fill.fgColor.rgb))
         _records, low, review_items, _template, _path = self.result
         self.assertEqual(low, 1)
         self.assertEqual(len(review_items), 1)
+        self.assertEqual(review_items[0]["sheet"], self.document.title)
         self.assertEqual(review_items[0]["column"], qty)
-        self.assertEqual(review_items[0]["row"], 3)
+        self.assertEqual(review_items[0]["row"], second)
 
     def test_a_flagged_formula_cell_queues_the_quantity_instead(self):
         # apply_review_file writes the corrected value straight into the cell,
         # so queueing the formula cell would replace the formula with a constant.
         flagged = document()
         flagged["items"][0]["review"]["line_total"] = True
-        sheet = self.build(flagged)
-        self.assertTrue(str(sheet.cell(2, self.column("الإجمالي")).value).startswith("="))
+        self.build(flagged)
+        total = self.column("الإجمالي", self.document)
+        first = self.item_row(1)
+        self.assertTrue(str(self.document.cell(first, total).value).startswith("="))
         _records, _low, review_items, _template, _path = self.result
         self.assertEqual(len(review_items), 1)
-        self.assertEqual(review_items[0]["column"], self.column("الكمية"))
+        self.assertEqual(review_items[0]["column"], self.column("الكمية", self.document))
 
     def test_no_queued_cell_ever_points_at_a_formula(self):
         flagged = document()
@@ -581,7 +613,7 @@ class ReviewTests(WorkbookCase):
         flagged["items"][2]["review"]["qty"] = True
         self.build(flagged)
         _records, _low, review_items, _template, _path = self.result
-        self.assertEqual(review_items[0]["row"], 4)
+        self.assertEqual(review_items[0]["row"], self.item_row(3))
 
     def test_a_flagged_total_is_highlighted(self):
         flagged = document()
@@ -610,10 +642,15 @@ class StructureTests(WorkbookCase):
         self.assertEqual(len(self.pages), 2)
         self.assertEqual(self.result[0], 6)
 
-    def test_the_workbook_opens_on_the_review_summary(self):
-        # What a reviewer needs first is "is any of this wrong", not row 41.
+    def test_the_workbook_opens_on_the_document_itself(self):
+        """What the customer wants first is their invoice, not our notes on it.
+
+        The workbook used to open on the review summary. It reads better as the
+        document, the data, then the notes — in that order.
+        """
         self.build()
-        self.assertIs(self.book.worksheets[0], self.summary)
+        self.assertIs(self.book.worksheets[0], self.document)
+        self.assertIs(self.book.worksheets[-1], self.summary)
 
     def test_an_english_document_is_written_in_english(self):
         """No Arabic anywhere in an English invoice's workbook.

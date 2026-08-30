@@ -191,15 +191,26 @@ _CANONICAL: list[tuple[str, re.Pattern[str]]] = [
 
 # Labels whose value is an amount and belongs with the totals, not the header.
 _TOTAL_LABELS: list[tuple[str, re.Pattern[str]]] = [
-    ("subtotal", re.compile(r"sub\s*total|المجموع\s*الفرعي|الإجمالي\s*قبل", re.I)),
-    ("discount", re.compile(r"discount|الخصم", re.I)),
-    ("tax_amount", re.compile(r"^(?:vat|tax|gst)\b(?!\s*(?:no|number|id|reg))|^الضريبة|القيمة\s*المضافة", re.I)),
+    # Tried in this order, and the order carries meaning: "المبلغ خاضع للضريبة"
+    # is the taxable subtotal and must be claimed before the tax pattern sees
+    # the word ضريبة inside it. Every one of these is a label a real invoice
+    # printed — there is no house style to rely on, so the vocabulary is wide.
+    ("subtotal", re.compile(
+        r"sub\s*total|taxable\s*(?:amount|value)|net\s*(?:amount|value)"
+        r"|المجموع\s*الفرعي|الإجمالي\s*قبل|خاضع\s*للضريب[ةه]|المبلغ\s*الخاضع"
+        r"|^مجموع$|^المجموع$|^الإجمالي\s*الفرعي$", re.I)),
+    ("discount", re.compile(r"discount|rebate|الخصم|خصم", re.I)),
+    ("tax_amount", re.compile(
+        r"^(?:vat|tax|gst)\b(?!\s*(?:no|number|id|reg))|^الضريبة|القيمة\s*المضافة"
+        r"|مبلغ\s*الضريب[ةه]|قيمة\s*الضريب[ةه]", re.I)),
     # ``^due$`` matches the word alone and nothing more, so a receipt's "Due
     # 943.00" is read as what is owed while "Due Date: 2025-11-10" — which is
     # tried against these patterns first — is left for the header fields.
     ("grand_total", re.compile(
-        r"grand\s*total|total\s*due|amount\s*due|balance\s*due|net\s*total|^due$|^total$"
-        r"|الإجمالي\s*النهائي|المبلغ\s*المستحق|^المستحق$", re.I)),
+        r"grand\s*total|total\s*due|amount\s*due|balance\s*due|net\s*total|invoice\s*total"
+        r"|^due$|^total$"
+        r"|الإجمالي\s*النهائي|المبلغ\s*المستحق|^المستحق$|مبلغ\s*الفاتورة|إجمالي\s*الفاتورة"
+        r"|المجموع\s*الكلي|صافي\s*الفاتورة|^الإجمالي$", re.I)),
 ]
 
 _AMOUNT = re.compile(r"-?\d[\d,٬\s]*(?:[.٫]\d+)?")

@@ -352,12 +352,21 @@ def html_rows(source: str) -> list[list[str]]:
     return parse_html_table(source).text_rows()
 
 
+_PERCENT_CELL = re.compile(r"^[\d.,٫٬\s]+%$")
+_ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+
+
 def _numeric(value: Any) -> float | str | None:
     """A numeric cell as a number.
 
     Text that will not parse is kept verbatim rather than blanked, so the shape
     gate reports "not a number" and the reviewer sees what was actually printed.
     An empty cell is genuinely absent.
+
+    A cell printed as a percentage becomes the fraction it means, so that the
+    workbook can show it back as "5%" and still calculate with it. Storing the
+    5 alone loses the sign that it was ever a rate, and a tax column of 5s beside
+    a tax column of amounts is a trap for whoever opens the file next.
     """
     from verify import to_number
 
@@ -365,6 +374,8 @@ def _numeric(value: Any) -> float | str | None:
     if not text:
         return None
     number = to_number(text)
+    if number is not None and _PERCENT_CELL.match(text.translate(_ARABIC_DIGITS)):
+        return number / 100.0
     return number if number is not None else text
 
 
@@ -437,6 +448,20 @@ _LABELLED_LINE = re.compile(r"[:：]\s*\S")
 _LABEL_SPLIT = re.compile(r"^([^:：]{2,40}?)\s*[:：]\s*(.+)$")
 _CLOCK = re.compile(r"\d\s*[:：]\s*\d")
 _HAS_LETTER = re.compile(r"[^\W\d_]", re.UNICODE)
+
+
+def _split_pair(text: str) -> tuple[str, str] | None:
+    """``label: value`` out of one run of text, or ``None`` if it is not one."""
+    body = str(text or "").strip()
+    if _CLOCK.search(body):
+        return None
+    match = _LABEL_SPLIT.match(body)
+    if not match:
+        return None
+    label, value = match.group(1).strip(), match.group(2).strip()
+    if not label or not value or not _HAS_LETTER.search(label):
+        return None
+    return label, value
 
 
 def labelled_fields(
@@ -577,6 +602,13 @@ def to_payload(page: dict[str, Any]) -> dict[str, Any]:
     lines: list[str] = []
     diagnostics: list[str] = []
     title = ""
+
+    # The page itself, block by block, in the order it is printed. Kept whole
+    # and separately from the interpretation below: what the reader understood
+    # about an invoice is one thing, and what is actually on the paper is
+    # another, and the customer asked for the paper.
+    sections: list[dict[str, Any]] = []
+
     for block in blocks(result):
         label = _block_label(block)
         content = _block_content(block)
@@ -587,20 +619,28 @@ def to_payload(page: dict[str, Any]) -> dict[str, Any]:
             if grid:
                 del grid.cells[MAX_TABLE_ROWS:]
                 grids.append(grid)
+                sections.append({"kind": "table", "index": len(grids) - 1})
             continue
-        if label in _TITLE_LABELS and not title:
-            title = re.sub(r"\s+", " ", content).strip()
+        if label in _TITLE_LABELS:
+            heading = re.sub(r"\s+", " ", content).strip()
+            if not title:
+                title = heading
+            sections.append({"kind": "title", "text": heading})
             continue
-        for line in content.splitlines():
-            if line.strip():
-                lines.append(line.strip())
+        block_lines = [line.strip() for line in content.splitlines() if line.strip()]
+        lines.extend(block_lines)
+        if block_lines:
+            sections.append({"kind": "text", "lines": block_lines})
 
     if not grids and not lines and markdown:
         # Older or degraded results only carry markdown; keep the text rather
         # than reporting an empty page.
         lines = [line.strip() for line in markdown.splitlines() if line.strip()]
+        if lines:
+            sections.append({"kind": "text", "lines": list(lines)})
 
     # ---- the tables ------------------------------------------------------
+    kinds = table_shape.grid_kinds(grids)
     grid, totals_grids, other_grids = table_shape.assemble(grids)
     if len(grids) > 1:
         diagnostics.append(
@@ -611,12 +651,18 @@ def to_payload(page: dict[str, Any]) -> dict[str, Any]:
     headings, body = table_shape.split_header(grid) if grid else ([], [])
     item_rows: list[list[table_shape.Cell]] = []
     stated_totals: list[tuple[str, float]] = []
+    # A totals line that carries one figure per column — "مجموع | 20 | 144,400 |
+    # 148,060" — cannot be read until the columns have meanings, so it waits.
+    column_totals: list[tuple[str, list[table_shape.Cell]]] = []
     for row in body:
         kind, label, amount = table_shape.classify_row(row)
-        if kind == table_shape.TOTAL and amount is not None:
+        if kind == table_shape.TOTAL:
             # A totals line printed inside the item grid. Counted as an item it
             # became a product called "Total" whose quantity was the amount due.
-            stated_totals.append((label, amount))
+            if amount is not None:
+                stated_totals.append((label, amount))
+            else:
+                column_totals.append((label, list(row)))
         elif kind == table_shape.ITEM:
             item_rows.append(row)
     stated_totals.extend(table_shape.read_totals(totals_grids))
@@ -632,6 +678,20 @@ def to_payload(page: dict[str, Any]) -> dict[str, Any]:
         for row in other.cells:
             cells = [cell.text.strip() for cell in row if cell.filled]
             if not cells:
+                continue
+            # A cell that already carries its own "label: value" is a field in
+            # its own right. Invoices print the customer box and the payment box
+            # side by side, and the reader returns them as one two-column table —
+            # so pairing the two cells of a row produced fields like
+            # "اسم: أجهزة كمبيوتر الأسمنت" = "أيام: 15", which is one box's label
+            # against the other box's value.
+            pairs = [_split_pair(text) for text in cells]
+            if any(pairs):
+                for text, pair in zip(cells, pairs):
+                    if pair is not None:
+                        side_fields.append(pair)
+                    else:
+                        lines.append(text)
                 continue
             if len(cells) == 2:
                 side_fields.append((cells[0], cells[1]))
@@ -662,6 +722,7 @@ def to_payload(page: dict[str, Any]) -> dict[str, Any]:
     columns: list[str] = []
     roles: list[str] = []
     items: list[dict[str, Any]] = []
+    item_totals: list[dict[str, Any]] = []
     if grid:
         texts = [[cell.text for cell in row] for row in item_rows]
         found = table_shape.assign_roles(headings, texts, totals=totals)
@@ -674,7 +735,33 @@ def to_payload(page: dict[str, Any]) -> dict[str, Any]:
         if "line_total" not in found.columns:
             diagnostics.append("column roles could not be resolved from this table")
 
+        # Now that the columns mean something, the figure a totals row printed
+        # under the amounts column is the document's total.
+        total_column = found.columns.get("line_total")
         keys = _item_keys(columns, roles)
+        for label, cells in column_totals:
+            amounts = table_shape.row_amounts(cells)
+            name = table_shape.totals_label(label) or "subtotal"
+            under = next(
+                (value for index, value in amounts if index == total_column), None
+            )
+            if under is None and amounts:
+                # No amounts column to sit under: the last figure on the line is
+                # the one a reader's eye lands on as the total.
+                under = amounts[-1][1]
+            if under is not None:
+                totals.setdefault(name, under)
+            # Kept cell by cell as well as read: the page prints this line as
+            # the last row of its table, and a workbook that reproduces the page
+            # has to show it there rather than only bank its figures.
+            item_totals.append({
+                "label": label,
+                "values": {
+                    key: cells[index].text if index < len(cells) else ""
+                    for index, key in enumerate(keys)
+                },
+            })
+
         for row in item_rows:
             item: dict[str, Any] = {}
             for index, key in enumerate(keys):
@@ -682,6 +769,42 @@ def to_payload(page: dict[str, Any]) -> dict[str, Any]:
                 item[key] = _numeric(value) if roles[index] in _NUMERIC_ROLES else value
             if any(str(value).strip() for value in item.values() if value is not None):
                 items.append(item)
+
+    # ---- the page, resolved ----------------------------------------------
+    # Each table section now knows what it turned out to be. The item grid is
+    # written from the verified items so it keeps its numbers and its formulas;
+    # everything else is written as it was printed.
+    resolved: list[dict[str, Any]] = []
+    for section in sections:
+        if section.get("kind") != "table":
+            resolved.append(section)
+            continue
+        index = int(section.get("index", -1))
+        kind = kinds[index] if 0 <= index < len(kinds) else table_shape.OTHER_GRID
+        if kind == table_shape.ITEMS_GRID:
+            resolved.append({"kind": "items"})
+        elif kind == table_shape.MORE_GRID:
+            # Its rows are already part of the item table above.
+            continue
+        elif kind == table_shape.TOTALS_GRID:
+            resolved.append({"kind": "totals"})
+        else:
+            other = grids[index]
+            other_headings, other_body = table_shape.split_header(other)
+            resolved.append({
+                "kind": "table",
+                "columns": other_headings,
+                "rows": [[cell.text for cell in row] for row in other_body],
+            })
+    # A totals block the page printed inside the item grid rather than in a box
+    # of its own still has to appear, and it belongs under the items.
+    if stated_totals and not any(s.get("kind") == "totals" for s in resolved):
+        position = next(
+            (number + 1 for number, s in enumerate(resolved) if s.get("kind") == "items"),
+            len(resolved),
+        )
+        resolved.insert(position, {"kind": "totals"})
+    sections = resolved
 
     # A two-column table already says which value belongs to which label, so it
     # is believed over anything a pattern guessed from running text.
@@ -736,8 +859,13 @@ def to_payload(page: dict[str, Any]) -> dict[str, Any]:
         "columns": columns,
         "column_roles": roles,
         "items": items,
+        # The table's own footing rows, as printed, to be written under it.
+        "item_totals": item_totals,
         "totals": totals,
         "notes": lines,
+        # The page as printed, block by block, so the workbook can reproduce it
+        # rather than only report what was understood about it.
+        "sections": sections,
         # How the table was read, in the reader's own words. Carried through the
         # gates as advisory notes so a wrong column on a customer's invoice can
         # be diagnosed from the job's warnings instead of by guesswork.

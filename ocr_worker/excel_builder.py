@@ -112,6 +112,8 @@ _TEXT: dict[str, tuple[str, str]] = {
         "لم يتم استخراج أي بيانات من هذا الملف.",
         "No data could be extracted from this file.",
     ),
+    # sheet names
+    "data_sheet": ("البيانات", "Data"),
     # review sheet
     "review": ("المراجعة", "Review"),
     "review_title": ("ملخّص المراجعة", "Review summary"),
@@ -288,10 +290,20 @@ def plan_header_columns(document: dict[str, Any]) -> list[tuple[str, str]]:
     keys = [str(key).strip() for key in header if str(key).strip()]
     known = [key for name in _HEADER_ORDER for key in keys if key.casefold() == name]
     rest = [key for key in keys if key not in known]
-    return [
-        (key, say(key.casefold(), key))
-        for key in (known + rest)[:MAX_HEADER_COLUMNS]
-    ]
+
+    # One column per value, not one per label. A page that prints its tax number
+    # twice — once labelled "TRN" and once "الرقم الضريبي" — was giving the sheet
+    # two identical columns repeated down every row, and a badly read page gave
+    # it a dozen.
+    chosen: list[str] = []
+    seen: set[str] = set()
+    for key in known + rest:
+        value = re.sub(r"\W+", "", str(header.get(key) or "").casefold())
+        if value and value in seen:
+            continue
+        seen.add(value)
+        chosen.append(key)
+    return [(key, say(key.casefold(), key)) for key in chosen[:MAX_HEADER_COLUMNS]]
 
 
 # Headings whose digits identify something rather than measure it. A tracking
@@ -304,6 +316,29 @@ _IDENTIFIER_HEADING = re.compile(
     r"|رقم|هاتف|جوال|كود|مرجع|حساب|بوليصة",
     re.I,
 )
+
+# A rate, not an amount. The column is stored as the fraction it means and
+# shown back the way the page printed it.
+PERCENT_FORMAT = "0.##%"
+_PERCENT_HEADING = re.compile(r"%|percent|rate\s*%|نسبة|بالمئة|بالمائة", re.I)
+
+
+def percent_column(heading: str, field: str, role: str, values: Sequence[Any]) -> bool:
+    """Whether a column of figures is a percentage rather than an amount.
+
+    Asked of the heading first — "ضريبة %" says so outright — and otherwise of
+    the numbers, because a tax column holding 0.05 on every row is a rate and
+    one holding 250.00 is an amount, and only one of the two should be shown
+    with a per-cent sign.
+    """
+    if _PERCENT_HEADING.search(f"{heading} {field}"):
+        return True
+    if role not in {"tax", "discount"}:
+        return False
+    numbers = [value for value in values if isinstance(value, (int, float))
+               and not isinstance(value, bool)]
+    return bool(numbers) and all(0 < abs(value) < 1 for value in numbers)
+
 
 # A heading that says the column holds money, when nothing else did.
 _MONEY_HEADING = re.compile(
@@ -329,7 +364,7 @@ def numeric_text_fields(
     its columns differently, and a heading match would convert an "Order No"
     somebody called "Order Total" on the next customer's paper.
     """
-    from verify import to_number
+    from table_shape import numeric_cell
 
     numeric: set[str] = set()
     for field, heading, role in fields:
@@ -345,7 +380,10 @@ def numeric_text_fields(
         # A leading zero carries meaning — 007 is a code, and 7 is not it.
         if any(re.match(r"0\d", text) for text in texts):
             continue
-        parsed = sum(1 for text in texts if to_number(text) is not None)
+        # Strictly "this cell is a number", not "a number appears in it": the
+        # second reading turns a column of product codes into a column of
+        # meaningless integers.
+        parsed = sum(1 for text in texts if numeric_cell(text) is not None)
         if parsed * 5 >= len(texts) * 4:
             numeric.add(field)
     return numeric
@@ -395,15 +433,19 @@ def _text_alignment(text: Any, *, wrap: bool = False, vertical: str = "top"):
 
 
 def _as_number(value: Any) -> float | None:
-    """A cell's value as a number, or ``None`` when it is not one."""
-    from verify import to_number
+    """A cell's value as a number, or ``None`` when the cell is not just a number.
+
+    Strict on purpose. The permissive reading — "find a number anywhere in the
+    text" — turned a product code column reading "ب ط 001" into the numbers 1,
+    2, 4, and the customer lost every product identifier on the invoice.
+    """
+    from table_shape import numeric_cell
 
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
         return float(value)
-    text = str(value or "").strip()
-    return to_number(text) if text else None
+    return numeric_cell(value)
 
 
 def _shown(value: Any) -> str:
@@ -773,6 +815,16 @@ def _write_page(
     return records, flagged, review_items
 
 
+def _data_sheet_title(base: str, page: int, taken: set[str]) -> str:
+    """A name for the flat data sheet that no other sheet has taken."""
+    candidate, suffix = base[:31], 2
+    while candidate in taken:
+        candidate = f"{base[:28]}_{suffix}"[:31]
+        suffix += 1
+    taken.add(candidate)
+    return candidate
+
+
 def _sheet_title(source: Path, page: int, total: int, taken: set[str]) -> str:
     base = re.sub(r"[\\/*?:\[\]]", "-", source.stem)[:26] or "Extracted"
     title = base if total <= 1 else f"{base[:24]}-{page}"
@@ -903,6 +955,8 @@ def write_ai_workbook(
         "stripe": PatternFill(fill_type="solid", fgColor=STRIPE),
     }
 
+    import document_sheet
+
     records = low = 0
     review_items: list[dict[str, Any]] = []
     taken: set[str] = set()
@@ -910,9 +964,12 @@ def write_ai_workbook(
     rtl_pages = sum(1 for d in documents if str(d.get("direction") or "") == "rtl")
     dominant_direction = "rtl" if documents and rtl_pages * 2 > len(documents) else "ltr"
 
+    # The document first, reproduced as printed. This is the sheet the customer
+    # opens and compares against the paper in their hand, so it is the one the
+    # review queue points into and the one the workbook opens on.
     for index, document in enumerate(documents, start=1):
         sheet = book.create_sheet(title=_sheet_title(source, index, len(documents), taken))
-        page_records, page_low, page_review = _write_page(
+        page_records, page_low, page_review = document_sheet.write_document(
             sheet, document, source, destination, styles
         )
         records += page_records
@@ -921,11 +978,24 @@ def write_ai_workbook(
         if not first_headings:
             first_headings = [heading for _field, heading, _role in plan_columns(document)]
 
+    # Then the same line items as one flat table — every row carrying the
+    # document's own header fields — for the customer who wants to sort, filter
+    # and pivot rather than read. Only written when there is a table to write.
+    for index, document in enumerate(documents, start=1):
+        if not document.get("items"):
+            continue
+        say = document_words(document)
+        sheet = book.create_sheet(title=_data_sheet_title(say("data_sheet"), index, taken))
+        _write_page(sheet, document, source, destination, styles)
+
     if not book.worksheets:
         sheet = book.create_sheet(title="Extracted")
         sheet.cell(1, 1, words_for(dominant_direction)("no_file_data"))
 
     _write_summary(book, styles, source, list(documents), records, review_items)
+    # The review summary is added at index 0, so put the document back in front:
+    # what the customer wants first is their invoice, not our notes about it.
+    book.move_sheet(book.worksheets[0], offset=len(book.worksheets) - 1)
     book.active = 0
 
     destination = _save_workbook(book, destination)

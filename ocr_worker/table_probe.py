@@ -36,7 +36,9 @@ def _blocks_from_html(text: str) -> dict:
 
     def add_text(chunk: str) -> None:
         for paragraph in re.split(r"</?p[^>]*>|<br\s*/?>|\n{2,}", chunk):
-            stripped = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", paragraph)).strip()
+            # Runs of spaces are kept: they are how a page separates two fields
+            # printed on one line, and the splitter downstream reads them.
+            stripped = re.sub(r"[^\S ]+", " ", re.sub(r"<[^>]+>", " ", paragraph)).strip()
             if stripped:
                 blocks.append({"block_label": "text", "block_content": stripped})
 
@@ -84,7 +86,8 @@ def probe(path: Path) -> int:
     rows = [[cell.text for cell in row]
             for row, (kind, *_rest) in zip(body, kinds) if kind == ts.ITEM]
 
-    stated = [(label, amount) for kind, label, amount in kinds if kind == ts.TOTAL]
+    stated = [(label, amount) for kind, label, amount in kinds
+              if kind == ts.TOTAL and amount is not None]
     stated.extend(ts.read_totals(totals))
     reconciled = ts.reconcile_totals(stated)
 

@@ -472,21 +472,23 @@ def html_to_blocks(html: str) -> dict[str, Any]:
     blocks: list[dict[str, Any]] = []
     position = 0
 
-    for match in re.finditer(r"<table[\s\S]*?</table>", text, re.IGNORECASE):
-        before = text[position:match.start()]
-        for paragraph in re.split(r"</?p[^>]*>|<br\s*/?>|\n{2,}", before):
+    def paragraphs(chunk: str) -> None:
+        for paragraph in re.split(r"</?p[^>]*>|<br\s*/?>|\n{2,}", chunk):
             stripped = re.sub(r"<[^>]+>", " ", paragraph)
-            stripped = re.sub(r"\s+", " ", stripped).strip()
+            # Line breaks and tabs are tidied away; runs of spaces are not.
+            # A page prints two fields on one line by putting white space
+            # between them — "Invoice No: 1    Date: 12/27/2021" — and that gap
+            # is the only evidence of where one field ends and the next begins.
+            # Collapsing it to a single space merged them into one value.
+            stripped = re.sub(r"[^\S ]+", " ", stripped).strip()
             if stripped:
                 blocks.append({"block_label": "text", "block_content": stripped})
+
+    for match in re.finditer(r"<table[\s\S]*?</table>", text, re.IGNORECASE):
+        paragraphs(text[position:match.start()])
         blocks.append({"block_label": "table", "block_content": match.group(0)})
         position = match.end()
-
-    for paragraph in re.split(r"</?p[^>]*>|<br\s*/?>|\n{2,}", text[position:]):
-        stripped = re.sub(r"<[^>]+>", " ", paragraph)
-        stripped = re.sub(r"\s+", " ", stripped).strip()
-        if stripped:
-            blocks.append({"block_label": "text", "block_content": stripped})
+    paragraphs(text[position:])
 
     return {"parsing_res_list": blocks}
 
