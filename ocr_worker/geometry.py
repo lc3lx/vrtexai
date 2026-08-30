@@ -194,7 +194,12 @@ _TOTAL_LABELS: list[tuple[str, re.Pattern[str]]] = [
     ("subtotal", re.compile(r"sub\s*total|المجموع\s*الفرعي|الإجمالي\s*قبل", re.I)),
     ("discount", re.compile(r"discount|الخصم", re.I)),
     ("tax_amount", re.compile(r"^(?:vat|tax|gst)\b(?!\s*(?:no|number|id|reg))|^الضريبة|القيمة\s*المضافة", re.I)),
-    ("grand_total", re.compile(r"grand\s*total|total\s*due|amount\s*due|net\s*total|^total$|الإجمالي\s*النهائي|المبلغ\s*المستحق", re.I)),
+    # ``^due$`` matches the word alone and nothing more, so a receipt's "Due
+    # 943.00" is read as what is owed while "Due Date: 2025-11-10" — which is
+    # tried against these patterns first — is left for the header fields.
+    ("grand_total", re.compile(
+        r"grand\s*total|total\s*due|amount\s*due|balance\s*due|net\s*total|^due$|^total$"
+        r"|الإجمالي\s*النهائي|المبلغ\s*المستحق|^المستحق$", re.I)),
 ]
 
 _AMOUNT = re.compile(r"-?\d[\d,٬\s]*(?:[.٫]\d+)?")

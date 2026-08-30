@@ -100,6 +100,7 @@ _TEXT: dict[str, tuple[str, str]] = {
     "tax_amount": ("الضريبة", "Tax"),
     "tax_rate": ("نسبة الضريبة", "Tax rate"),
     "grand_total": ("الإجمالي النهائي", "Total"),
+    "amount_paid": ("المدفوع", "Paid"),
     # page furniture
     "page_n": ("صفحة", "Page"),
     "read_value": ("القيمة المقروءة من الصورة", "Value read from the image"),
@@ -146,7 +147,10 @@ _TEXT: dict[str, tuple[str, str]] = {
     "needs_confirming": ("تحتاج تأكيداً", "Needs confirming"),
 }
 
-_TOTAL_ORDER = ("subtotal", "discount", "tax_amount", "grand_total")
+# Written in the order a document states them. ``amount_paid`` sits after the
+# total because that is where a receipt prints it — it is what was handed over,
+# not part of what was owed, so no formula is built from it.
+_TOTAL_ORDER = ("subtotal", "discount", "tax_amount", "grand_total", "amount_paid")
 
 # The order the header columns are laid out in, when the document happens to
 # carry them. Who and what first, then the references, then the dates and terms
@@ -245,17 +249,26 @@ def plan_columns(document: dict[str, Any]) -> list[tuple[str, str, str]]:
         heading = headings.get(role) or say(role, field)
         fields.append((field, heading, role))
 
-    # Model-declared order first, so the sheet mirrors the printed table.
     present: list[str] = []
     for item in document.get("items") or []:
         for key in item:
             if key in _PRIVATE_ITEM_KEYS or key.startswith("_") or key in present:
                 continue
             present.append(key)
-    for role in order:
-        for field in present:
-            if field.casefold() == role:
-                add(field)
+    known = {field.casefold(): field for field in present}
+
+    # The order the document printed, column by column, taken from the reader's
+    # own list rather than from the order the keys happen to sit in an object.
+    # It is the customer's choice: the sheet is meant to read like the paper it
+    # came from, so a recognised column is not promoted to the front for being
+    # recognised — "Inward Quantity" stays where it was printed even though the
+    # column beside it is the one the formulas use.
+    for index, role in enumerate(roles):
+        name = str(columns[index]).strip() if index < len(columns) else ""
+        key = role if role in ROLES and role != "other" else name
+        field = known.get(str(key).casefold())
+        if field is not None:
+            add(field)
     for field in present:
         add(field)
     return fields

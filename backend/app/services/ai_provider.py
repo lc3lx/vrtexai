@@ -271,6 +271,11 @@ READ_PAGE_PROMPT = """Transcribe this document page exactly as printed.
 Rules:
 - Every table becomes an HTML <table> with <tr> and <td>. Keep the original
   column order and one <td> per printed cell, including empty ones.
+- Every <tr> in a table must have the SAME number of <td> as the header row.
+  Never use colspan or rowspan. Where the page merges cells, write the text in
+  the first column it covers and write <td></td> for each remaining column.
+- A total, tax or balance line printed inside a table stays a row of that same
+  table, with its label in the first column and its amount under the amounts.
 - Numbers exactly as printed: keep separators and decimals, drop currency signs.
 - Never compute, correct, infer or complete a value. If a cell is unreadable,
   write it as best you can and move on.

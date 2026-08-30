@@ -14,10 +14,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
-QTY = re.compile(r"(?:qty|quantity|units?|pcs|عدد|الكمية|كمية)", re.I)
-UNIT_PRICE = re.compile(r"(?:unit\s*price|price|rate|unit\s*cost|السعر|سعر\s*الوحدة|سعر)", re.I)
-LINE_TOTAL = re.compile(r"(?:line\s*total|amount|total|القيمة|المبلغ|الإجمالي|المجموع)", re.I)
-DESCRIPTION = re.compile(r"(?:desc|item|product|service|particulars?|البيان|الوصف|الصنف|المادة)", re.I)
+# The column-name vocabulary used to live here, one flat pattern per role, and
+# whichever column matched first took the role. It moved to
+# :mod:`table_shape`, where a heading is one of three kinds of evidence and the
+# candidates are weighed against each other — "Product ID" no longer takes the
+# description from "Product Name" for containing the word "product".
 
 SUBTOTAL_LABEL = re.compile(r"(?:sub\s*total|subtotal|المجموع\s*الفرعي|الإجمالي\s*قبل)", re.I)
 TAX_LABEL = re.compile(r"(?:tax|vat|gst|ضريبة|القيمة\s*المضافة)", re.I)
@@ -53,102 +54,26 @@ def _close(left: float, right: float, tolerance: float = 0.02) -> bool:
     return abs(left - right) <= max(tolerance, abs(right) * 0.005)
 
 
-def _column_roles(columns: list[str], rows: list[list[dict[str, Any]]]) -> dict[str, int]:
-    """Map qty / unit_price / line_total / description onto column indices."""
-    roles: dict[str, int] = {}
-    for index, name in enumerate(columns):
-        text = str(name or "")
-        if "qty" not in roles and QTY.search(text):
-            roles["qty"] = index
-        elif "line_total" not in roles and LINE_TOTAL.search(text):
-            roles["line_total"] = index
-        elif "unit_price" not in roles and UNIT_PRICE.search(text):
-            roles["unit_price"] = index
-        elif "description" not in roles and DESCRIPTION.search(text):
-            roles["description"] = index
-
-    return roles
-
-
-def _numeric_columns(rows: list[list[dict[str, Any]]]) -> list[int]:
-    if not rows:
-        return []
-    width = max(len(row) for row in rows)
-    found = []
-    for index in range(width):
-        values = [to_number(row[index]["text"]) for row in rows if index < len(row)]
-        filled = [value for value in values if value is not None]
-        if filled and len(filled) >= max(1, len(values) // 2):
-            found.append(index)
-    return found
-
-
-def _agreement(rows: list[list[dict[str, Any]]], qty: int, price: int, total: int) -> float:
-    """Fraction of rows where qty x price equals the total."""
-    checked = matched = 0
-    for row in rows:
-        if max(qty, price, total) >= len(row):
-            continue
-        a = to_number(row[qty]["text"])
-        b = to_number(row[price]["text"])
-        c = to_number(row[total]["text"])
-        if a is None or b is None or c is None:
-            continue
-        checked += 1
-        if _close(a * b, c):
-            matched += 1
-    return matched / checked if checked else 0.0
-
-
 def resolve_roles(columns: list[str], rows: list[list[dict[str, Any]]]) -> dict[str, int]:
-    """Find a qty/price/total mapping that the table's own numbers confirm.
+    """Find a qty/price/total mapping the table's own evidence confirms.
 
-    Header names are tried first, then every arrangement of numeric columns.
-    A mapping is only used if the arithmetic actually holds across the table —
-    otherwise a spreadsheet with nine numeric columns gets three of them
-    labelled at random and every row reported as broken.
+    The decision itself lives in :func:`table_shape.assign_roles`, which weighs
+    the heading, the content of the column and the arithmetic between columns
+    against each other instead of taking the first heading that matches a
+    pattern. Both readers — this geometric one and the vision-led one — go
+    through it, so a column named badly on one path is named badly on neither.
+
+    The return shape is unchanged: ``{role: column index}`` plus ``agreement``,
+    which :func:`verify` uses to decide how loudly to complain.
     """
-    roles = _column_roles(columns, rows)
-    required = ("qty", "unit_price", "line_total")
-    named = all(key in roles for key in required)
-    named_score = (
-        _agreement(rows, roles["qty"], roles["unit_price"], roles["line_total"])
-        if named else 0.0
-    )
-    if named and named_score >= 0.5:
-        roles["agreement"] = named_score
-        return roles
+    from table_shape import assign_roles
 
-    numeric = _numeric_columns(rows)
-    best: tuple[float, tuple[int, int, int]] | None = None
-    for qty in numeric:
-        for price in numeric:
-            if price == qty:
-                continue
-            for total in numeric:
-                if total in {qty, price}:
-                    continue
-                score = _agreement(rows, qty, price, total)
-                if score >= 0.7 and (best is None or score > best[0]):
-                    best = (score, (qty, price, total))
-    if best is not None:
-        score, (qty, price, total) = best
-        discovered = {"qty": qty, "unit_price": price, "line_total": total, "agreement": score}
-        if "description" in roles:
-            discovered["description"] = roles["description"]
-        return discovered
-
-    if named:
-        # A column headed "Quantity" is strong evidence regardless of whether
-        # the numbers currently add up — low agreement here usually means the
-        # rows are misread, which is exactly what needs repairing. Keep the
-        # named roles, and let `verify` decide how loudly to complain.
-        roles["agreement"] = named_score
-        return roles
-
-    # Nothing names the columns and no relation holds: there is no check to
-    # make, so report nothing rather than guess three columns at random.
-    return {key: value for key, value in roles.items() if key == "description"}
+    texts = [[str(cell.get("text") or "") for cell in row] for row in rows]
+    found = assign_roles(list(columns or []), texts)
+    resolved: dict[str, int] = dict(found.columns)
+    if found.columns:
+        resolved["agreement"] = found.agreement  # type: ignore[assignment]
+    return resolved
 
 
 def _candidates(cell: dict[str, Any]) -> list[tuple[str, float]]:

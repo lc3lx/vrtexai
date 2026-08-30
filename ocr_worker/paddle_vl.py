@@ -339,22 +339,17 @@ def _block_content(block: dict[str, Any]) -> str:
 
 
 def html_rows(source: str) -> list[list[str]]:
-    """Rows from the model's HTML table.
+    """The text of a model's HTML table, as a rectangular grid.
 
-    The tag stripping is the parser the PP-Structure path already relies on;
-    entity decoding is added here. The model emits real HTML, so a company
-    named "Bags &amp; Cases" reaches the sheet with the escape still in it —
-    observed on a real document, where cells read ``Handbags &amp; Leather``
-    and ``Ladies&#x27; Garments``.
+    Merges are resolved rather than ignored — see
+    :func:`table_shape.parse_html_table`. Reading ``<td>`` elements in order and
+    trusting their count is what put a row's values one column to the left of
+    their headings whenever anything on the page was merged, which on a real
+    invoice is always.
     """
-    import html as html_module
+    from table_shape import parse_html_table
 
-    from invoice_ai import _html_table_to_rows
-
-    return [
-        [html_module.unescape(cell) for cell in row]
-        for row in _html_table_to_rows(source)
-    ]
+    return parse_html_table(source).text_rows()
 
 
 def _numeric(value: Any) -> float | str | None:
@@ -373,40 +368,33 @@ def _numeric(value: Any) -> float | str | None:
     return number if number is not None else text
 
 
-def _cell(text: str) -> dict[str, Any]:
-    # The VL model reports no per-cell confidence, so cells start trusted and
-    # are demoted only by the gates in ai_extract.
-    return {"text": str(text or "").strip(), "conf": 100.0, "alternatives": []}
-
-
 def _looks_like_header(row: list[str]) -> bool:
-    from verify import to_number
+    """Whether a row of plain text is naming the columns."""
+    from table_shape import Cell, looks_like_header
 
-    filled = [value for value in row if str(value).strip()]
-    if len(filled) < 2:
-        return False
-    return not any(to_number(value) is not None for value in filled)
+    return looks_like_header([Cell(text=str(value or "").strip()) for value in row])
 
 
-def _pick_table(tables: list[list[list[str]]]) -> list[list[str]]:
-    """The item grid is the widest, tallest table on the page."""
-    if not tables:
-        return []
-    return max(tables, key=lambda rows: (len(rows), max((len(row) for row in rows), default=0)))
+def _item_keys(headings: list[str], roles: list[str]) -> list[str]:
+    """The key each column takes in an item object.
 
-
-def _roles_for(columns: list[str], rows: list[list[dict[str, Any]]]) -> list[str]:
-    """Map each column index to a role name using the arithmetic-backed resolver."""
-    from verify import resolve_roles
-
-    width = max((len(row) for row in rows), default=len(columns))
-    resolved = resolve_roles(columns, rows)
-    roles = ["other"] * max(width, len(columns))
-    for role in ("description", "qty", "unit_price", "line_total"):
-        index = resolved.get(role)
-        if isinstance(index, int) and 0 <= index < len(roles):
-            roles[index] = role
-    return roles
+    A column whose role is known is keyed by the role, because that is what
+    ``excel_builder`` and the arithmetic gate look for; anything else keeps the
+    heading the document printed, which is what the customer asked for. The
+    result is made unique either way — two columns sharing a key would mean the
+    second silently overwrote the first.
+    """
+    keys: list[str] = []
+    seen: dict[str, int] = {}
+    for index, role in enumerate(roles):
+        name = role if role != "other" else (
+            headings[index].strip() if index < len(headings) and headings[index].strip()
+            else f"column_{index + 1}"
+        )
+        count = seen.get(name.casefold(), 0) + 1
+        seen[name.casefold()] = count
+        keys.append(name if count == 1 else f"{name} ({count})")
+    return keys
 
 
 def _direction(text: str) -> str:
@@ -442,8 +430,13 @@ _PARTY_HEADING = re.compile(
 # A line that is a field in its own right, and so the end of the block above it.
 _LABELLED_LINE = re.compile(r"[:：]\s*\S")
 
-# ``Label: value`` inside one run of text.
+# ``Label: value`` inside one run of text. The label has to read like a label:
+# at least one letter, and never a digit on either side of the colon — that
+# colon belongs to a clock. "Time 3:00 PM" was arriving in the workbook as a
+# column headed "Time 3" holding the value "00 PM".
 _LABEL_SPLIT = re.compile(r"^([^:：]{2,40}?)\s*[:：]\s*(.+)$")
+_CLOCK = re.compile(r"\d\s*[:：]\s*\d")
+_HAS_LETTER = re.compile(r"[^\W\d_]", re.UNICODE)
 
 
 def labelled_fields(
@@ -462,24 +455,31 @@ def labelled_fields(
     recognises the word "Total" and cannot see it inside "Total: 900.00", so a
     plainly printed grand total went unread until the two were separated.
     """
-    from geometry import canonical_field, to_number, total_field
+    from geometry import canonical_field, total_field
+    from table_shape import numeric_cell
 
     pairs: list[tuple[str, str]] = []
     totals: dict[str, float] = {}
     for line in lines:
         for chunk in re.split(r"\s{2,}|\t|\|", line):
-            match = _LABEL_SPLIT.match(chunk.strip())
+            chunk = chunk.strip()
+            if _CLOCK.search(chunk):
+                continue
+            match = _LABEL_SPLIT.match(chunk)
             if not match:
                 continue
             label, value = match.group(1).strip(), match.group(2).strip()
-            if not label or not value:
+            if not label or not value or not _HAS_LETTER.search(label):
                 continue
             name = total_field(label)
             if name is not None:
-                amount = to_number(value)
+                # Strictly a number, not "a number somewhere in the text": the
+                # date in "Due: 2025/11/10" would otherwise be banked as a
+                # grand total of 2025.
+                amount = numeric_cell(value)
                 if amount is not None:
                     totals.setdefault(name, amount)
-                continue
+                    continue
             pairs.append((canonical_field(label) or label, value))
     return pairs, totals
 
@@ -554,14 +554,28 @@ def _totals_from_lines(lines: list[str]) -> dict[str, float]:
 
 
 def to_payload(page: dict[str, Any]) -> dict[str, Any]:
-    """Turn one PaddleOCR-VL page into the schema the gates expect."""
+    """Turn one PaddleOCR-VL page into the schema the gates expect.
+
+    This function no longer parses anything itself. It collects the page's
+    blocks and hands them to :mod:`table_shape`, which rebuilds each table as
+    printed — merges resolved, header band folded into one label per column,
+    totals rows separated from line items — and then argues each column's role
+    from the heading, the content and the arithmetic together.
+
+    The order matters and is deliberate: the totals are read **before** the
+    roles, because "this column adds up to the printed subtotal" is often the
+    only evidence there is for which column is the line total. A services
+    invoice has nothing to multiply.
+    """
+    import table_shape
     from invoice import extract_invoice_fields
 
     result = page.get("result") if isinstance(page.get("result"), dict) else page
     markdown = str(page.get("markdown") or "")
 
-    tables: list[list[list[str]]] = []
+    grids: list[table_shape.Grid] = []
     lines: list[str] = []
+    diagnostics: list[str] = []
     title = ""
     for block in blocks(result):
         label = _block_label(block)
@@ -569,9 +583,10 @@ def to_payload(page: dict[str, Any]) -> dict[str, Any]:
         if not content or label in _SKIP_LABELS:
             continue
         if label in _TABLE_LABELS or "<table" in content.casefold():
-            rows = html_rows(content)
-            if rows:
-                tables.append(rows[:MAX_TABLE_ROWS])
+            grid = table_shape.parse_html_table(content)
+            if grid:
+                del grid.cells[MAX_TABLE_ROWS:]
+                grids.append(grid)
             continue
         if label in _TITLE_LABELS and not title:
             title = re.sub(r"\s+", " ", content).strip()
@@ -580,77 +595,109 @@ def to_payload(page: dict[str, Any]) -> dict[str, Any]:
             if line.strip():
                 lines.append(line.strip())
 
-    if not tables and not lines and markdown:
+    if not grids and not lines and markdown:
         # Older or degraded results only carry markdown; keep the text rather
         # than reporting an empty page.
         lines = [line.strip() for line in markdown.splitlines() if line.strip()]
 
-    grid = _pick_table(tables)
-    columns: list[str] = []
-    items: list[dict[str, Any]] = []
-    roles: list[str] = []
-    if grid:
-        body = grid
-        if _looks_like_header(grid[0]):
-            columns = [str(value).strip() for value in grid[0]]
-            body = grid[1:]
-        cell_rows = [[_cell(value) for value in row] for row in body]
-        roles = _roles_for(columns, cell_rows)
-        for row in body:
-            item: dict[str, Any] = {}
-            for index, value in enumerate(row):
-                role = roles[index] if index < len(roles) else "other"
-                key = role if role != "other" else (
-                    columns[index].strip() if index < len(columns) and columns[index].strip()
-                    else f"column_{index + 1}"
-                )
-                item[key] = _numeric(value) if role in _NUMERIC_ROLES else value
-            if any(str(value).strip() for value in item.values() if value is not None):
-                items.append(item)
-        if not columns:
-            columns = [
-                role if role != "other" else f"column_{index + 1}"
-                for index, role in enumerate(roles)
-            ]
+    # ---- the tables ------------------------------------------------------
+    grid, totals_grids, other_grids = table_shape.assemble(grids)
+    if len(grids) > 1:
+        diagnostics.append(
+            f"tables: {len(grids)} read, {grid.height} item rows, "
+            f"{len(totals_grids)} totals, {len(other_grids)} other"
+        )
 
-    # Any table that is not the item grid carries page detail, not silently
-    # dropped. A two-column one is a list of label/value pairs — that is what
+    headings, body = table_shape.split_header(grid) if grid else ([], [])
+    item_rows: list[list[table_shape.Cell]] = []
+    stated_totals: list[tuple[str, float]] = []
+    for row in body:
+        kind, label, amount = table_shape.classify_row(row)
+        if kind == table_shape.TOTAL and amount is not None:
+            # A totals line printed inside the item grid. Counted as an item it
+            # became a product called "Total" whose quantity was the amount due.
+            stated_totals.append((label, amount))
+        elif kind == table_shape.ITEM:
+            item_rows.append(row)
+    stated_totals.extend(table_shape.read_totals(totals_grids))
+
+    # ---- the page's other tables and text --------------------------------
+    # A table that is neither the item grid nor a totals box still carries page
+    # detail. A two-column one is a list of label/value pairs — that is what
     # invoices use for "Invoice No", "VAT", "Total" — so it is kept as pairs
-    # rather than pasted into one string. Cells joined with " | " used to arrive
-    # in the workbook as a single unreadable cell, and the field patterns then
-    # had to guess where one value ended and the next label began.
+    # rather than pasted into one string.
     side_fields: list[tuple[str, str]] = []
-    for table in tables:
-        if table is grid:
-            continue
-        for row in table:
-            cells = [str(value).strip() for value in row if str(value).strip()]
+    unplaced = 0
+    for other in other_grids:
+        for row in other.cells:
+            cells = [cell.text.strip() for cell in row if cell.filled]
             if not cells:
                 continue
             if len(cells) == 2:
                 side_fields.append((cells[0], cells[1]))
             else:
+                # A wider table that is neither the item grid nor a totals box.
+                # Its cells still go into the page text, but they no longer have
+                # columns, so say so: this is the one path by which a reading can
+                # still lose structure, and a silent loss is what made the last
+                # missing price column so hard to explain.
                 lines.extend(cells)
+                unplaced += len(cells)
+    if unplaced:
+        diagnostics.append(f"{unplaced} cells from another table were read as text, not columns")
 
     header = extract_invoice_fields(lines)
     currency = header.pop("currency", "")
-    totals = _totals_from_lines(lines)
+    # What the tables state outranks what a pattern found in running text: the
+    # table said which amount belongs to which label, and the text was guessed
+    # at. Anything the tables did not mention is still filled in from the lines.
+    totals = table_shape.reconcile_totals(stated_totals)
+    for key, amount in _totals_from_lines(lines).items():
+        totals.setdefault(key, amount)
     for key in ("subtotal", "tax_amount", "grand_total"):
         if key in header:
             header.pop(key, None)
 
+    # ---- what each column means -----------------------------------------
+    columns: list[str] = []
+    roles: list[str] = []
+    items: list[dict[str, Any]] = []
+    if grid:
+        texts = [[cell.text for cell in row] for row in item_rows]
+        found = table_shape.assign_roles(headings, texts, totals=totals)
+        width = max(grid.width, len(headings))
+        roles = found.role_list(width)
+        columns = list(headings) + [
+            f"column_{index + 1}" for index in range(len(headings), width)
+        ]
+        diagnostics.extend(found.notes)
+        if "line_total" not in found.columns:
+            diagnostics.append("column roles could not be resolved from this table")
+
+        keys = _item_keys(columns, roles)
+        for row in item_rows:
+            item: dict[str, Any] = {}
+            for index, key in enumerate(keys):
+                value = row[index].text if index < len(row) else ""
+                item[key] = _numeric(value) if roles[index] in _NUMERIC_ROLES else value
+            if any(str(value).strip() for value in item.values() if value is not None):
+                items.append(item)
+
     # A two-column table already says which value belongs to which label, so it
     # is believed over anything a pattern guessed from running text.
-    from geometry import canonical_field, to_number, total_field
+    from geometry import canonical_field, total_field
+    from table_shape import numeric_cell
 
     for label, value in side_fields:
         clean_label = re.sub(r"[:：]\s*$", "", label).strip()
         total_name = total_field(clean_label)
         if total_name is not None:
-            amount = to_number(value)
+            amount = numeric_cell(value)
             if amount is not None:
-                totals[total_name] = amount
-            continue
+                # Behind the tables that were read as totals: those had their
+                # labels reconciled against each other, and this one did not.
+                totals.setdefault(total_name, amount)
+                continue
         field = canonical_field(clean_label)
         if field is not None:
             header[field] = value
@@ -677,8 +724,8 @@ def to_payload(page: dict[str, Any]) -> dict[str, Any]:
     for key in [key for key in header if str(key).strip().casefold() == "currency"]:
         # Popped whether or not it is needed: an ``or`` here would short-circuit
         # the pop as soon as a currency had been found and leave the column in.
-        found = str(header.pop(key) or "").strip()
-        currency = currency or found
+        printed = str(header.pop(key) or "").strip()
+        currency = currency or printed
 
     return {
         "document_type": "invoice" if (items and totals) else ("table" if items else "other"),
@@ -691,4 +738,8 @@ def to_payload(page: dict[str, Any]) -> dict[str, Any]:
         "items": items,
         "totals": totals,
         "notes": lines,
+        # How the table was read, in the reader's own words. Carried through the
+        # gates as advisory notes so a wrong column on a customer's invoice can
+        # be diagnosed from the job's warnings instead of by guesswork.
+        "diagnostics": diagnostics,
     }

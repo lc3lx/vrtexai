@@ -345,7 +345,15 @@ def validate(
     blocking = list(shape_errors) + list(arithmetic_errors)
     if not document.get("items") and not document.get("header") and not document.get("totals"):
         blocking.append("The model returned no items and no fields from the page.")
-    return document, blocking, grounding_errors
+    # How the table was read travels with the advisory notes. When a column
+    # lands under the wrong heading on a customer's invoice, this is the line
+    # that says which columns the reader thought were the quantity and the
+    # price, and how well the arithmetic backed it — the difference between
+    # diagnosing that page and guessing at it.
+    advisory = list(grounding_errors) + [
+        f"table: {note}" for note in (payload.get("diagnostics") or [])
+    ][:20]
+    return document, blocking, advisory
 
 
 # --------------------------------------------------------------------------
@@ -498,7 +506,8 @@ def read_page_document(
             notes.append(f"ai-attempt-{number}:{type(error).__name__}")
             continue
 
-        document, blocking, _advisory = validate(payload, seen)
+        document, blocking, advisory = validate(payload, seen)
+        notes.extend(advisory[:8])
         if not blocking:
             notes.append(f"ai:page{page}:clean")
             return document, notes

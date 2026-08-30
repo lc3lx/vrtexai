@@ -690,6 +690,26 @@ class StructureTests(WorkbookCase):
         price = get_column_letter(self.column("سعر الوحدة"))
         self.assertEqual(sheet.cell(2, self.column("الإجمالي")).value, f"={qty}2*{price}2")
 
+    def test_a_recognised_column_is_not_promoted_to_the_front(self):
+        """The sheet reads like the paper, not like the schema.
+
+        An inventory sheet prints "Inward Quantity" and "Outward Quantity"
+        before the "Quantity In Stock" that the formulas actually use. Pulling
+        the recognised columns forward rearranged the customer's own table.
+        """
+        self.build(document(
+            columns=["Product ID", "Product Name", "Inward Qty", "Qty In Stock", "Rate", "Amount"],
+            column_roles=["sku", "description", "other", "qty", "unit_price", "line_total"],
+            items=[{"sku": "MSG001", "description": "Item 1", "Inward Qty": "150",
+                    "qty": 25, "unit_price": 1500.0, "line_total": 37500.0,
+                    "review": {}, "notes": {}}],
+            totals={},
+        ))
+        self.assertEqual(
+            [cell.value for cell in self.sheet[1]][-6:],
+            ["Product ID", "Product Name", "Inward Qty", "Qty In Stock", "Rate", "Amount"],
+        )
+
     def test_an_unknown_field_becomes_a_plain_column(self):
         sheet = self.build(document(items=[
             {"description": "قلم", "qty": 2, "unit_price": 15.5, "line_total": 31.0,

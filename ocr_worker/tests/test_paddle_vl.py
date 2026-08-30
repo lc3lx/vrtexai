@@ -73,9 +73,15 @@ class TableShapeTests(unittest.TestCase):
         self.assertFalse(paddle_vl._looks_like_header(["البنود"]))
 
     def test_the_widest_tallest_table_is_chosen_as_the_item_grid(self):
-        small = [["الرقم الضريبي", "300000"]]
-        large = paddle_vl.html_rows(ITEM_TABLE)
-        self.assertIs(paddle_vl._pick_table([small, large]), large)
+        import table_shape
+
+        small = table_shape.parse_html_table(
+            "<table><tr><td>الرقم الضريبي</td><td>300000</td></tr></table>"
+        )
+        large = table_shape.parse_html_table(ITEM_TABLE)
+        items, _totals, others = table_shape.assemble([small, large])
+        self.assertEqual(items.text_rows(), large.text_rows())
+        self.assertEqual([grid.text_rows() for grid in others], [small.text_rows()])
 
 
 class DirectionTests(unittest.TestCase):
@@ -129,28 +135,36 @@ class TotalsTests(unittest.TestCase):
 
 
 class RoleTests(unittest.TestCase):
+    """The roles come from :mod:`table_shape`; these pin the behaviour the
+    converter depends on."""
+
+    @staticmethod
+    def _roles(columns, rows):
+        import table_shape
+
+        width = max(len(columns), max((len(row) for row in rows), default=0))
+        return table_shape.assign_roles(columns, rows).role_list(width)
+
     def test_roles_come_from_arithmetic_not_from_the_heading_alone(self):
-        rows = [[paddle_vl._cell(value) for value in row]
-                for row in paddle_vl.html_rows(ITEM_TABLE)[1:]]
-        roles = paddle_vl._roles_for(["الوصف", "الكمية", "سعر الوحدة", "الإجمالي"], rows)
+        roles = self._roles(
+            ["الوصف", "الكمية", "سعر الوحدة", "الإجمالي"],
+            paddle_vl.html_rows(ITEM_TABLE)[1:],
+        )
         self.assertEqual(roles, ["description", "qty", "unit_price", "line_total"])
 
     def test_unnamed_columns_are_still_resolved_when_the_maths_holds(self):
         # A scan that lost its header row must not lose its formulas.
-        rows = [[paddle_vl._cell(value) for value in row]
-                for row in paddle_vl.html_rows(ITEM_TABLE)[1:]]
-        roles = paddle_vl._roles_for([], rows)
+        roles = self._roles([], paddle_vl.html_rows(ITEM_TABLE)[1:])
         self.assertEqual(roles[1], "qty")
         self.assertEqual(roles[2], "unit_price")
         self.assertEqual(roles[3], "line_total")
 
     def test_a_table_whose_numbers_relate_to_nothing_gets_no_invented_roles(self):
-        rows = [[paddle_vl._cell(value) for value in row] for row in [
+        roles = self._roles(["أ", "ب", "ج", "د"], [
             ["بند", "5", "9", "77"],
             ["بند", "3", "4", "12000"],
             ["بند", "8", "2", "31"],
-        ]]
-        roles = paddle_vl._roles_for(["أ", "ب", "ج", "د"], rows)
+        ])
         self.assertNotIn("line_total", roles)
 
 
@@ -175,6 +189,56 @@ class PayloadTests(unittest.TestCase):
             {"block_label": "table", "block_content": broken},
         ]}))
         self.assertEqual(payload["items"][0]["qty"], "غير محدد")
+
+    def test_a_receipt_with_merged_totals_rows_keeps_its_price_and_total(self):
+        """The complaint this whole layer answers.
+
+        A receipt prints its totals as rows of the item grid with the label
+        merged across three columns. Read without the merges, the row was four
+        cells short, every value slid left, and the workbook came back with no
+        price and no total — and with a product called "Total" whose quantity
+        was the amount due.
+        """
+        receipt = """<table>
+        <tr><td>Item</td><td>Qty</td><td>Price</td><td>Total</td></tr>
+        <tr><td>SAKAR GAS STONE 1,</td><td>10</td><td>34.78</td><td>347.83</td></tr>
+        <tr><td>NIPAL HADID 3/4</td><td>1</td><td>4.35</td><td>4.35</td></tr>
+        <tr><td colspan="3">Total</td><td>352.18</td></tr>
+        <tr><td colspan="3">VAT 15%</td><td>52.82</td></tr>
+        <tr><td colspan="3">Due</td><td>405.00</td></tr>
+        </table>"""
+        payload = paddle_vl.to_payload(page(result={"parsing_res_list": [
+            {"block_label": "table", "block_content": receipt},
+        ]}))
+        self.assertEqual(len(payload["items"]), 2)
+        self.assertEqual([item["description"] for item in payload["items"]],
+                         ["SAKAR GAS STONE 1,", "NIPAL HADID 3/4"])
+        self.assertEqual(payload["items"][0]["unit_price"], 34.78)
+        self.assertEqual(payload["items"][0]["line_total"], 347.83)
+        # And the totals are totals, reconciled against each other.
+        self.assertEqual(payload["totals"]["subtotal"], 352.18)
+        self.assertEqual(payload["totals"]["tax_amount"], 52.82)
+        self.assertEqual(payload["totals"]["grand_total"], 405.00)
+
+    def test_an_item_grid_split_in_two_keeps_every_column(self):
+        first = """<table>
+        <tr><td>الوصف</td><td>الكمية</td><td>سعر الوحدة</td><td>الإجمالي</td></tr>
+        <tr><td>قلم</td><td>2</td><td>15.50</td><td>31.00</td></tr></table>"""
+        second = """<table>
+        <tr><td>دفتر</td><td>3</td><td>10.00</td><td>30.00</td></tr></table>"""
+        payload = paddle_vl.to_payload(page(result={"parsing_res_list": [
+            {"block_label": "table", "block_content": first},
+            {"block_label": "table", "block_content": second},
+        ]}))
+        self.assertEqual(len(payload["items"]), 2)
+        self.assertEqual(payload["items"][1]["unit_price"], 10.0)
+        self.assertEqual(payload["items"][1]["line_total"], 30.0)
+
+    def test_how_the_table_was_read_is_reported(self):
+        # The failure being diagnosed looks right in the workbook, so the job
+        # has to say which columns it took for the quantity and the price.
+        payload = paddle_vl.to_payload(page())
+        self.assertTrue(any("roles:" in note for note in payload["diagnostics"]))
 
     def test_a_blank_numeric_cell_becomes_absent_not_zero(self):
         blank = ITEM_TABLE.replace("<td>2</td>", "<td></td>")

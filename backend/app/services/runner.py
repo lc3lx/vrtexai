@@ -17,6 +17,7 @@ It reads a request, writes a result beside it, and exits.
 from __future__ import annotations
 
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -42,6 +43,33 @@ def report(stage: str, state: str, **fields: Any) -> None:
 def _worker_on_path(worker_root: str) -> None:
     if worker_root not in sys.path:
         sys.path.insert(0, worker_root)
+
+
+def _dump_page(source: Path, number: int, payload: dict[str, Any], warnings: list[str]) -> None:
+    """Keep the reader's raw answer for a page, when asked to.
+
+    Set ``VERTEX_DUMP_PAGES`` to a directory and every page the model returns is
+    written there untouched. A customer's invoice that comes out wrong can then
+    be replayed through ``paddle_vl.to_payload`` in a second, on any machine,
+    without the model, the image or the wait — which is the difference between
+    diagnosing a new invoice shape and guessing at it.
+
+    Off unless the variable is set: these files hold the customer's document.
+    """
+    import os
+
+    directory = (os.environ.get("VERTEX_DUMP_PAGES") or "").strip()
+    if not directory:
+        return
+    try:
+        target = Path(directory)
+        target.mkdir(parents=True, exist_ok=True)
+        stem = re.sub(r"[^\w.-]+", "_", source.stem)[:60] or "page"
+        path = target / f"{stem}.p{number}.json"
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    except OSError as error:
+        # A diagnostic that fails must never fail the job it was diagnosing.
+        warnings.append(f"page-dump-skipped:{type(error).__name__}")
 
 
 def run_clean(request: dict[str, Any]) -> dict[str, Any]:
@@ -156,6 +184,8 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
         report("ai_vision", "done", ms=timings["ai_vision"],
                page=page_number, pages=total_pages)
 
+        _dump_page(source, page_number, outcome.pages[0].as_payload(), warnings)
+
         # Verification always happens here, never on the machine that did the
         # reading. A model grading its own output would prove nothing.
         report("verification", "running", page=page_number, pages=total_pages)
@@ -178,12 +208,17 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
                 payload.setdefault("totals", {})[field] = amount
         except Exception as error:
             warnings.append(f"geometry-skipped:{type(error).__name__}")
-        document, blocking, _advisory = ai_extract.validate(
+        document, blocking, advisory = ai_extract.validate(
             payload, ai_extract.page_numbers(words)
         )
         document["page"] = page_number
         documents.append(document)
         warnings.extend(blocking[:5])
+        # Which columns the reader took for the quantity, the price and the
+        # total, and how well the arithmetic agreed. Kept because the failure
+        # this diagnoses — a value under the wrong heading — looks perfectly
+        # fine in the workbook and can only be caught by knowing what was read.
+        warnings.extend(advisory[:8])
         timings["verification"] = timings.get("verification", 0) + int(
             (time.perf_counter() - started) * 1000
         )
