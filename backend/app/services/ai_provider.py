@@ -558,7 +558,19 @@ class FallbackProvider(AIProvider):
         except AIUnavailable as error:
             self.last_fallback_reason = str(error)
             logger.warning("primary vision provider unavailable, falling back: %s", error)
-            outcome = self._backup.read(image_path)
+            try:
+                outcome = self._backup.read(image_path)
+            except Exception as backup_error:
+                # Both readers are out, and only one of the two reasons is the
+                # one to act on. Reporting the backup's alone — "the local
+                # environment is not installed" — sent the customer installing a
+                # reader they never meant to use, when what actually happened is
+                # that the hosted model did not answer. Both are named, the one
+                # that failed first is named first.
+                raise AIFailed(
+                    f"{self._primary.name} could not read the page ({error}); "
+                    f"the {self._backup.name} fallback could not either ({backup_error})"
+                ) from backup_error
             outcome.provider = f"{self._backup.name} (fallback)"
             outcome.fallback_reason = str(error)
             return outcome

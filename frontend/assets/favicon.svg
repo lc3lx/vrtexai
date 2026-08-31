@@ -1,0 +1,14 @@
+<!--
+  Browser-tab / app icon: the Vertex mark on its brand navy square, matching
+  the hero ground (--navy / --navy-ink in landing.css) instead of relying on
+  currentColor, since a standalone favicon has no inherited text color to pick
+  up and would otherwise render as a barely-visible dark shape.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Vertex">
+  <rect width="512" height="512" fill="#1B2A5B"/>
+  <g transform="translate(106,178.1) scale(0.5769)" fill="#F2F5FD">
+    <path d="M 0 0 L 148 0 L 272 206 C 264 238 238 260 204 258 C 176 256 156 246 148 226 Z"/>
+    <path d="M 288 192 L 354 26 C 362 4 380 0 391 20 L 512 262 L 398 262
+             C 366 262 342 238 332 202 C 326 182 308 180 288 192 Z"/>
+  </g>
+</svg>

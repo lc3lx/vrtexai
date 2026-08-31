@@ -234,3 +234,66 @@ class TruncationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FallbackTests(unittest.TestCase):
+    """When both readers are out, only one of the two reasons is actionable."""
+
+    def _providers(self):
+        from app.services.ai_provider import AIFailed, AIProvider, AIUnavailable
+
+        class Busy(AIProvider):
+            name = "openrouter"
+
+            def health(self):
+                return False, "busy"
+
+            def read(self, path):
+                raise AIUnavailable("OpenRouter upstream 429: rate limited")
+
+        class NotInstalled(AIProvider):
+            name = "local"
+
+            def health(self):
+                return False, "not installed"
+
+            def read(self, path):
+                raise AIFailed("The PaddleOCR-VL environment is not installed in this build.")
+
+        return Busy(), NotInstalled()
+
+    def test_the_failure_names_the_reader_that_was_meant_to_do_the_work(self):
+        # The job used to fail saying only "the PaddleOCR-VL environment is not
+        # installed", which sent the customer installing a reader they never
+        # meant to use. What actually happened is the hosted model did not answer.
+        from app.services.ai_provider import AIFailed, FallbackProvider
+
+        busy, missing = self._providers()
+        with self.assertRaises(AIFailed) as caught:
+            FallbackProvider(busy, missing).read(Path("page.png"))
+        message = str(caught.exception)
+        self.assertIn("openrouter", message)
+        self.assertIn("rate limited", message)
+        self.assertLess(message.index("openrouter"), message.index("local"))
+
+    def test_the_fallback_reason_is_still_reported_when_it_succeeds(self):
+        from app.services.ai_provider import (AIProvider, FallbackProvider,
+                                              PageStructure, ReadOutcome)
+
+        busy, _missing = self._providers()
+
+        class Works(AIProvider):
+            name = "local"
+
+            def health(self):
+                return True, "ready"
+
+            def read(self, path):
+                return ReadOutcome(
+                    pages=[PageStructure(result={}, markdown="x")],
+                    provider=self.name, inference_ms=1,
+                )
+
+        outcome = FallbackProvider(busy, Works()).read(Path("page.png"))
+        self.assertIn("fallback", outcome.provider)
+        self.assertIn("rate limited", outcome.fallback_reason)

@@ -40,8 +40,34 @@ async def lifespan(app: FastAPI):
         "ready · ai_provider=%s · fallback=%s · storage=%s",
         settings.ai_provider, settings.ai_fallback_local, settings.storage_path,
     )
+    _warn_if_the_safety_net_is_missing(settings)
     yield
     await disconnect()
+
+
+def _warn_if_the_safety_net_is_missing(settings) -> None:
+    """Say at boot when ``AI_FALLBACK_LOCAL`` promises something that is not there.
+
+    The local reader ships with the desktop build; a server usually has neither
+    the environment nor the model weights. Left unsaid, the shortfall surfaces
+    only much later, as a job that fails the first time the hosted model is
+    busy — and with the local reader's complaint on it, which is the wrong thing
+    to go and fix.
+    """
+    if not settings.ai_fallback_local or settings.ai_provider == "local":
+        return
+    try:
+        from app.services.ai_provider import LocalProvider
+
+        ready, detail = LocalProvider(settings.worker_root).health()
+    except Exception as error:  # a broken check must not stop the service
+        ready, detail = False, f"{type(error).__name__}: {error}"
+    if not ready:
+        logger.warning(
+            "AI_FALLBACK_LOCAL is on but the local reader cannot run here (%s). "
+            "When %s is busy or out of credit, jobs will fail rather than fall back.",
+            detail, settings.ai_provider,
+        )
 
 
 app = FastAPI(

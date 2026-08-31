@@ -238,6 +238,10 @@ const T = {
   e_unknown:["حدث خطأ غير متوقع.","Something unexpected went wrong."],
 
   /* Failures recorded on a job by the reader itself. */
+  // Said apart from e_reader_failed on purpose: the document was fine, and
+  // telling its owner to rescan it sends them fixing something that is not broken.
+  e_reader_unavailable:["خدمة القراءة غير متاحة الآن، والمستند سليم. أعد المحاولة بعد قليل، وإن تكرّر فأبلغ المسؤول.",
+                        "The reading service is unavailable right now — nothing is wrong with your document. Try again shortly, and tell your administrator if it keeps happening."],
   e_reader_failed:["تعذّرت قراءة هذا المستند. جرّب صورة أوضح أو ملفاً آخر.",
                    "This document could not be read. Try a clearer scan or another file."],
   e_reader_crashed:["توقّف القارئ فجأة أثناء المعالجة. أعد المحاولة، وإن تكرّر أبلغ المسؤول.",

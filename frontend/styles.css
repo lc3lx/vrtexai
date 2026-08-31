@@ -67,11 +67,12 @@ body[data-lang="ar"] .eyebrow{letter-spacing:.02em;font-size:11.5px}
 .rail{background:var(--surface);border-inline-end:1px solid var(--line);display:flex;flex-direction:column;gap:3px;padding:18px 12px;position:sticky;top:0;height:100dvh}
 .brand{display:flex;align-items:center;gap:10px;padding:6px 8px 8px}
 .mark{width:32px;height:32px;border-radius:8px;background:var(--accent);display:grid;place-items:center;flex:none}
-.mark span{display:block;width:15px;height:15px;background:
-  linear-gradient(var(--accent-ink),var(--accent-ink)) 0 0/100% 1.5px no-repeat,
-  linear-gradient(var(--accent-ink),var(--accent-ink)) 0 50%/100% 1.5px no-repeat,
-  linear-gradient(var(--accent-ink),var(--accent-ink)) 0 100%/100% 1.5px no-repeat,
-  linear-gradient(var(--accent-ink),var(--accent-ink)) 45% 0/1.5px 100% no-repeat}
+/* The real Vertex "VA" monogram (assets/vertex-mark.svg), the same file the
+   landing page's .lmark uses — masked in accent-ink so it reads on the badge's
+   accent-coloured background in both themes, rather than a generic glyph. */
+.mark span{display:block;width:17px;height:17px;background:var(--accent-ink);
+  -webkit-mask:url(/static/assets/vertex-mark.svg) center/contain no-repeat;
+  mask:url(/static/assets/vertex-mark.svg) center/contain no-repeat}
 .brand b{display:block;font-size:15px;font-weight:600;letter-spacing:-.02em;line-height:1.25}
 .brand small{display:block;font-size:11px;color:var(--muted);font-weight:500}
 .rolechip{display:flex;align-items:center;gap:6px;margin:0 8px 16px;padding:5px 9px;border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:11px;font-weight:700}

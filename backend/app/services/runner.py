@@ -275,6 +275,18 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _no_reader_was_available(error: BaseException) -> bool:
+    """Did the job fail because nothing could read, rather than because of the page?"""
+    try:
+        from app.services.ai_provider import AIUnavailable
+    except Exception:
+        return False
+    if isinstance(error, AIUnavailable):
+        return True
+    # Both readers out: the fallback raises AIFailed carrying both reasons.
+    return "fallback could not either" in str(error)
+
+
 def main() -> int:
     request_path = Path(sys.argv[1])
     request = json.loads(request_path.read_text(encoding="utf-8"))
@@ -287,9 +299,14 @@ def main() -> int:
         text = str(error)
         if isinstance(error, (FileNotFoundError, OSError)) and not text:
             text = type(error).__name__
+        # "reader_failed" tells the customer to try a clearer image. That is the
+        # right advice for a page nothing could make sense of, and the wrong
+        # advice entirely when no reader was available to look at it — their
+        # document was never the problem, and no amount of rescanning helps.
         code = (
             "no_page_read" if "no page could be read" in text
             else "source_missing" if isinstance(error, FileNotFoundError)
+            else "reader_unavailable" if _no_reader_was_available(error)
             else "reader_failed"
         )
         result = {"ok": False, "code": code, "error": f"{type(error).__name__}: {error}"}
