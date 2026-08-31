@@ -143,6 +143,10 @@ _TEXT: dict[str, tuple[str, str]] = {
         "لم تجرِ قراءة مستقلة لهذه الصفحة — لم يُقابَل أي رقم بالصورة",
         "No independent reading was available — no figure was checked against the image",
     ),
+    # Said differently from a printed total, because it is not one: the page
+    # carried a column of amounts and no sum, so the sheet adds them up. Naming
+    # it plainly is what keeps the workbook a record rather than a claim.
+    "computed_total": ("المجموع (محسوب)", "Total (calculated)"),
     "repaired": ("قيم صُحّحت بالحساب", "Corrected by arithmetic"),
     "repaired_note": (
         "رقم قُرئ خطأً وأثبت الحساب قيمته الصحيحة؛ الخلية مُعلَّمة وفيها ملاحظة بما تغيّر",
@@ -332,6 +336,25 @@ _IDENTIFIER_HEADING = re.compile(
 # A rate, not an amount. The column is stored as the fraction it means and
 # shown back the way the page printed it.
 PERCENT_FORMAT = "0.##%"
+
+# Excel prints a trailing point for a whole number under "#,##0.###" — a
+# quantity of 10 showed as "10." in the customer's sheet — so a column of whole
+# numbers gets a format with no decimal part at all.
+WHOLE_FORMAT = "#,##0"
+FRACTION_FORMAT = "#,##0.###"
+
+
+def quantity_format_for(values: Sequence[Any]) -> str:
+    """The format for a column of counts, measured from what is in it.
+
+    Parsed rather than type-checked: a column the reader had no role for arrives
+    as the text it printed, and "10" is as whole a number as 10 is.
+    """
+    numbers = [number for number in (_as_number(value) for value in values)
+               if number is not None]
+    if numbers and all(float(number).is_integer() for number in numbers):
+        return WHOLE_FORMAT
+    return FRACTION_FORMAT
 _PERCENT_HEADING = re.compile(r"%|percent|rate\s*%|نسبة|بالمئة|بالمائة", re.I)
 
 
@@ -520,7 +543,7 @@ def _write_page(
     label_fill = styles["label_fill"]
     stripe = styles.get("stripe")
     currency = money_format(str(document.get("currency") or ""))
-    quantity_format = "#,##0.###"
+    quantity_format = FRACTION_FORMAT
 
     # One decision, taken once: which way the page reads. It turns the whole
     # sheet around so column A sits where the document's first column sits, and
@@ -538,6 +561,10 @@ def _write_page(
     fields = plan_columns(document)
     items = list(document.get("items") or [])
     numeric_fields = numeric_text_fields(items, fields)
+    counts = {
+        field: quantity_format_for([item.get(field) for item in items])
+        for field, _heading, _role in fields
+    }
 
     # Which page a row came from, kept only when the sheet holds more than one.
     # A merged manifest is a single table, and "page 3" is how a reviewer finds
@@ -690,10 +717,10 @@ def _write_page(
                     cell.number_format = currency
                     cell.alignment = _number_alignment()
                 elif role in QTY_ROLES:
-                    cell.number_format = quantity_format
+                    cell.number_format = counts.get(field, quantity_format)
                     cell.alignment = _number_alignment(horizontal="center")
                 elif numeric:
-                    cell.number_format = quantity_format
+                    cell.number_format = counts.get(field, quantity_format)
                     cell.alignment = _number_alignment()
                 else:
                     cell.alignment = _text_alignment(

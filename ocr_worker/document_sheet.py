@@ -108,7 +108,7 @@ def write_document(
     say = builder.document_words(document)
 
     currency = builder.money_format(str(document.get("currency") or ""))
-    quantity_format = "#,##0.###"
+    quantity_format = builder.FRACTION_FORMAT
     width = sheet_width(document)
     widths: dict[int, int] = {}
     review_items: list[dict[str, Any]] = []
@@ -215,6 +215,12 @@ def write_document(
             field for field, heading, role in fields
             if builder.percent_column(heading, field, role, [i.get(field) for i in items])
         }
+        # A column of whole numbers is shown without a decimal point: Excel
+        # renders 10 as "10." under a format that allows decimals.
+        counts = {
+            field: builder.quantity_format_for([item.get(field) for item in items])
+            for field, _heading, _role in fields
+        }
 
         header_row = row
         role_columns: dict[str, int] = {}
@@ -281,10 +287,10 @@ def write_document(
                     cell.number_format = currency
                     cell.alignment = builder._number_alignment()
                 elif role in builder.QTY_ROLES:
-                    cell.number_format = quantity_format
+                    cell.number_format = counts.get(field, quantity_format)
                     cell.alignment = builder._number_alignment(horizontal="center")
                 elif numeric:
-                    cell.number_format = quantity_format
+                    cell.number_format = counts.get(field, quantity_format)
                     cell.alignment = builder._number_alignment()
                 else:
                     cell.alignment = builder._text_alignment(
@@ -336,11 +342,15 @@ def write_document(
     def write_totals() -> None:
         nonlocal row, flagged
         totals = document.get("totals") or {}
-        if not totals:
-            return
         review = document.get("totals_review") or {}
         notes = document.get("totals_notes") or {}
         first, last, role_columns, item_width = state.get("items", (0, 0, {}, 0))
+        # A page can carry a column of amounts and print no sum of them — a
+        # shipping manifest usually does. The sheet adds them up rather than
+        # leaving the customer to, as a formula and under a label that says it
+        # was calculated, so nobody mistakes it for a figure off the paper.
+        if not totals and not (first and last and role_columns.get("line_total")):
+            return
         total_column = role_columns.get("line_total") or max(2, min(width, item_width or width))
         label_column = max(1, total_column - 1)
         written: dict[str, int] = {}
@@ -349,7 +359,11 @@ def write_document(
             if key not in totals and not (key == "subtotal" and first):
                 continue
             value = totals.get(key)
-            label_cell = sheet.cell(row, label_column, say(key, key))
+            printed = key in totals
+            label_cell = sheet.cell(
+                row, label_column,
+                say(key, key) if printed else say("computed_total"),
+            )
             is_grand = key == "grand_total"
             builder._style_cell(label_cell, border=thin, bold=True)
             label_cell.fill = label_fill

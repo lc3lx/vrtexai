@@ -500,8 +500,17 @@ class FormattingTests(WorkbookCase):
         self.assertIn("ر.س", sheet.cell(2, self.column("سعر الوحدة")).number_format)
         self.assertIn("#,##0.00", sheet.cell(2, self.column("الإجمالي")).number_format)
 
-    def test_quantity_uses_its_own_format(self):
+    def test_a_whole_quantity_is_shown_without_a_decimal_point(self):
+        # Excel renders 10 as "10." under a format that allows decimals, which
+        # is what the customer saw down their quantity column.
         sheet = self.build()
+        self.assertEqual(sheet.cell(2, self.column("الكمية")).number_format, "#,##0")
+
+    def test_a_fractional_quantity_keeps_its_decimals(self):
+        sheet = self.build(document(items=[
+            {"description": "قماش", "qty": 2.5, "unit_price": 10.0, "line_total": 25.0,
+             "review": {}, "notes": {}},
+        ], totals={}))
         self.assertEqual(sheet.cell(2, self.column("الكمية")).number_format, "#,##0.###")
 
     def test_currency_falls_back_to_a_plain_number_format(self):

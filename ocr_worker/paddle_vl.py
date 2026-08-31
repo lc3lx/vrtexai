@@ -738,6 +738,21 @@ def to_payload(page: dict[str, Any]) -> dict[str, Any]:
         # Now that the columns mean something, the figure a totals row printed
         # under the amounts column is the document's total.
         total_column = found.columns.get("line_total")
+        # What the amounts are printed in. Taken from the money cells themselves,
+        # which is the page saying it outright — a manifest whose every amount
+        # reads "$25,000" has declared its currency more plainly than any line
+        # of prose, and without this the workbook showed bare numbers.
+        if not currency:
+            money = [
+                row[index].text
+                for role in ("line_total", "unit_price", "discount", "tax")
+                for index in [found.columns.get(role)]
+                if index is not None
+                for row in item_rows
+                if index < len(row)
+            ]
+            currency = table_shape.currency_of(money)
+
         keys = _item_keys(columns, roles)
         for label, cells in column_totals:
             amounts = table_shape.row_amounts(cells)
@@ -796,9 +811,12 @@ def to_payload(page: dict[str, Any]) -> dict[str, Any]:
                 "columns": other_headings,
                 "rows": [[cell.text for cell in row] for row in other_body],
             })
-    # A totals block the page printed inside the item grid rather than in a box
-    # of its own still has to appear, and it belongs under the items.
-    if stated_totals and not any(s.get("kind") == "totals" for s in resolved):
+    # A totals block belongs under the items whenever there is one to write —
+    # whether the page printed it inside the grid rather than in a box of its
+    # own, or printed no sum at all and the sheet is going to add the column up.
+    if (stated_totals or totals or "line_total" in roles) and not any(
+        section.get("kind") == "totals" for section in resolved
+    ):
         position = next(
             (number + 1 for number, s in enumerate(resolved) if s.get("kind") == "items"),
             len(resolved),

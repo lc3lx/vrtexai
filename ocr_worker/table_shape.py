@@ -228,6 +228,30 @@ _MONEY = re.compile(
 )
 
 
+def _grouped_properly(digits: str) -> bool:
+    """Are the separators in this figure thousands separators?
+
+    A phone number printed "222 555 7777" is not two-billion-something. The
+    difference is the grouping: a thousands separator always leaves groups of
+    exactly three, and 7777 is four. Getting this wrong cost far more than a
+    misformatted cell — the phone counted as a figure, which made the recipient
+    box look like a table with data in it, which let its three label rows be
+    eaten as a stacked heading. One misread cell collapsed the whole block.
+    """
+    groups = re.split(r"[,٬\s]", digits)
+    if len(groups) == 1:
+        return True
+    if not 1 <= len(groups[0]) <= 3:
+        return False
+    if all(len(group) == 3 for group in groups[1:]):
+        return True
+    # South Asian grouping: thousands, then pairs — 12,34,567 is twelve lakh
+    # thirty-four thousand. Allowed because the product reads invoices from
+    # exporters who write amounts that way, and refusing it would turn every one
+    # of their figures into text.
+    return len(groups[-1]) == 3 and all(len(group) == 2 for group in groups[1:-1])
+
+
 def numeric_cell(text: Any) -> float | None:
     """The value of a cell that holds a number and nothing else.
 
@@ -248,10 +272,39 @@ def numeric_cell(text: Any) -> float | None:
     match = _MONEY.match(body)
     if not match:
         return None
+    figure = match.group(1)
+    whole = re.split(r"[.٫]", figure)[0]
+    if not _grouped_properly(whole):
+        return None
     try:
-        return float(re.sub(r"[,٬\s]", "", match.group(1)).replace("٫", "."))
+        return float(re.sub(r"[,٬\s]", "", figure).replace("٫", "."))
     except ValueError:
         return None
+
+
+_CURRENCY_IN_CELL = re.compile(rf"({_CURRENCY})", re.I)
+_SYMBOL_CODES = {"$": "USD", "€": "EUR", "£": "GBP", "¥": "JPY", "₹": "INR", "﷼": "SAR"}
+
+
+def currency_of(texts: Sequence[Any]) -> str:
+    """The currency the figures themselves are printed in.
+
+    Read off the cells rather than hunted for in the page's prose. A manifest
+    that prints "$25,000" in every amount has said what its currency is more
+    plainly than any sentence could, and taking it from there is what puts the
+    sign back beside the numbers in the workbook.
+    """
+    counts: dict[str, int] = {}
+    for text in texts:
+        match = _CURRENCY_IN_CELL.search(str(text or ""))
+        if not match:
+            continue
+        mark = match.group(1).strip()
+        code = _SYMBOL_CODES.get(mark, mark.upper())
+        counts[code] = counts.get(code, 0) + 1
+    if not counts:
+        return ""
+    return max(counts.items(), key=lambda entry: entry[1])[0]
 
 
 def _matrix(rows: Sequence[Sequence[str]]) -> list[list[float | None]]:

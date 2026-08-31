@@ -241,6 +241,83 @@ class DataSheetTests(unittest.TestCase):
         self.assertEqual(book.sheetnames[-1], "المراجعة")
 
 
+MANIFEST = """<p>inquire@impactrun.mail | Lincoln, NE 68501 | 222 555 7777 | Template.net</p>
+<p>Shipping Manifest</p>
+<p>Recipient Information</p>
+<table>
+<tr><td>Recipient Name</td><td>KinFinity</td></tr>
+<tr><td>Recipient Email</td><td>inquire@kinfinity.mail</td></tr>
+<tr><td>Recipient Address</td><td>Greensboro, NC 27401</td></tr>
+<tr><td>Recipient Phone</td><td>222 555 7777</td></tr>
+</table>
+<p>Shipping Details</p>
+<table>
+<tr><td>Item Description</td><td>Quantity</td><td>Weight</td><td>Dimensions</td><td>Total Value</td></tr>
+<tr><td>Apple MacBook Pro 16"</td><td>10</td><td>2 kg</td><td>36x24x2cm</td><td>$25,000</td></tr>
+<tr><td>Logitech MX Master 3</td><td>5</td><td>0.2 kg</td><td>12x8x4cm</td><td>$500</td></tr>
+<tr><td>Bose QuietComfort 35 II</td><td>3</td><td>0.5 kg</td><td>18x18x8cm</td><td>$600</td></tr>
+</table>"""
+
+
+class ManifestTests(unittest.TestCase):
+    """A shipping manifest in English, and the four faults it exposed."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.payload, cls.document, _blocking, cls.book, cls._dir = build(MANIFEST)
+        cls.sheet = cls.book.worksheets[0]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.book.close()
+        cls._dir.cleanup()
+
+    def row_of(self, text: str) -> int:
+        for row in self.sheet.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str) and cell.value.strip() == text:
+                    return cell.row
+        raise AssertionError(f"'{text}' is not on the sheet")
+
+    def test_the_recipient_box_keeps_one_row_per_field(self):
+        # All four rows arrived crammed into one: three labels in one cell and
+        # three values in another.
+        first = self.row_of("Recipient Name")
+        for offset, (label, value) in enumerate((
+            ("Recipient Name", "KinFinity"),
+            ("Recipient Email", "inquire@kinfinity.mail"),
+            ("Recipient Address", "Greensboro, NC 27401"),
+            ("Recipient Phone", "222 555 7777"),
+        )):
+            self.assertEqual(self.sheet.cell(first + offset, 1).value, label)
+            self.assertEqual(self.sheet.cell(first + offset, 2).value, value)
+
+    def test_the_phone_number_is_still_a_phone_number(self):
+        # It reached the sheet as the number 2,225,557,777.
+        cell = self.sheet.cell(self.row_of("Recipient Phone"), 2)
+        self.assertEqual(cell.value, "222 555 7777")
+        self.assertNotIsInstance(cell.value, (int, float))
+
+    def test_the_amounts_carry_the_dollar_sign_the_page_prints(self):
+        self.assertEqual(self.document["currency"], "USD")
+        row = self.row_of("Apple MacBook Pro 16\"")
+        cell = self.sheet.cell(row, 5)
+        self.assertEqual(cell.value, 25000)
+        self.assertIn("$", cell.number_format)
+
+    def test_a_whole_quantity_shows_without_a_trailing_point(self):
+        cell = self.sheet.cell(self.row_of("Apple MacBook Pro 16\""), 2)
+        self.assertEqual(cell.number_format, "#,##0")
+
+    def test_a_page_that_prints_no_total_still_gets_one(self):
+        # The manifest has a column of amounts and no sum of them. The sheet
+        # adds them up, as a formula, under a label that says it calculated it.
+        row = self.row_of("Total (calculated)")
+        formula = self.sheet.cell(row, 5).value
+        self.assertTrue(str(formula).startswith("=SUM("))
+        self.assertIn("$", self.sheet.cell(row, 5).number_format)
+
+
 class SplitLineTests(unittest.TestCase):
     def test_a_line_of_two_labelled_fields_becomes_four_cells(self):
         self.assertEqual(

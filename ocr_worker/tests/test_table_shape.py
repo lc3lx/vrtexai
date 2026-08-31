@@ -370,6 +370,54 @@ class NumberTests(unittest.TestCase):
         self.assertIsNone(ts.numeric_cell("2025/11/10"))
         self.assertIsNone(ts.numeric_cell("28-Oct-2022"))
 
+    def test_a_phone_number_is_not_two_billion(self):
+        """One misread cell that collapsed a whole block.
+
+        "222 555 7777" counted as a figure, so the recipient box looked like a
+        table with data in it, so its three label rows were eaten as a stacked
+        heading — and the phone itself reached the sheet as 2,225,557,777.
+        A thousands separator leaves groups of three; 7777 is four.
+        """
+        self.assertIsNone(ts.numeric_cell("222 555 7777"))
+        self.assertIsNone(ts.numeric_cell("555 12 3456"))
+
+    def test_real_thousands_grouping_still_parses(self):
+        self.assertEqual(ts.numeric_cell("1 234 567"), 1234567.0)
+        self.assertEqual(ts.numeric_cell("25 000 000"), 25000000.0)
+        self.assertEqual(ts.numeric_cell("1,500.00"), 1500.0)
+
+    def test_south_asian_grouping_parses_too(self):
+        # Exporters write twelve lakh as 12,34,567; refusing it would turn every
+        # amount on their invoices into text.
+        self.assertEqual(ts.numeric_cell("12,34,567"), 1234567.0)
+
+
+class FieldBoxTests(unittest.TestCase):
+    RECIPIENT = """<table>
+    <tr><td>Recipient Name</td><td>KinFinity</td></tr>
+    <tr><td>Recipient Email</td><td>inquire@kinfinity.mail</td></tr>
+    <tr><td>Recipient Address</td><td>Greensboro, NC 27401</td></tr>
+    <tr><td>Recipient Phone</td><td>222 555 7777</td></tr>
+    </table>"""
+
+    def test_a_box_of_labels_and_values_keeps_every_row(self):
+        grid = ts.parse_html_table(self.RECIPIENT)
+        headings, body = ts.split_header(grid)
+        self.assertEqual(headings, [], "the label rows were read as column names")
+        self.assertEqual(len(body), 4)
+        self.assertEqual(body[3][1].text, "222 555 7777")
+
+
+class CurrencyTests(unittest.TestCase):
+    def test_the_currency_is_read_off_the_figures(self):
+        # A manifest whose every amount reads "$25,000" has said what its
+        # currency is more plainly than any sentence could.
+        self.assertEqual(ts.currency_of(["$25,000", "$500", "$600"]), "USD")
+        self.assertEqual(ts.currency_of(["AED 25000", "AED 500"]), "AED")
+
+    def test_figures_with_no_currency_say_nothing(self):
+        self.assertEqual(ts.currency_of(["25,000", "500"]), "")
+
 
 if __name__ == "__main__":
     unittest.main()
