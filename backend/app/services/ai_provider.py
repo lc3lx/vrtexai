@@ -276,7 +276,13 @@ Rules:
   the first column it covers and write <td></td> for each remaining column.
 - A total, tax or balance line printed inside a table stays a row of that same
   table, with its label in the first column and its amount under the amounts.
-- Numbers exactly as printed: keep separators and decimals, drop currency signs.
+- Numbers exactly as printed, digit for digit. Copy every digit you see: do not
+  round, do not shorten, do not drop a zero. Before moving on from a figure,
+  count its digits on the page and check your answer has the same number. A rate
+  printed 25,000 written as 2,500 is the most damaging error you can make here.
+- Arabic-Indic digits (٠١٢٣٤٥٦٧٨٩) are digits: transcribe them as the Western
+  digits they stand for, in the same order, with no digit lost.
+- Keep separators and decimals as printed; drop only the currency sign.
 - Never compute, correct, infer or complete a value. If a cell is unreadable,
   write it as best you can and move on.
 - Text outside tables goes in <p> tags, in reading order.

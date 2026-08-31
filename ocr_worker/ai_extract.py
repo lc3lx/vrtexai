@@ -185,11 +185,125 @@ def _normalise(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
 # --------------------------------------------------------------------------
 # Gate 2 — arithmetic
 # --------------------------------------------------------------------------
-def check_arithmetic(document: dict[str, Any]) -> list[str]:
-    """Cross-check the model's own numbers. Flags cells in place."""
+def _digits(value: float) -> str:
+    """The digit sequence of a number, without separators or decimal point."""
+    text = f"{float(value):.4f}".rstrip("0").rstrip(".")
+    return re.sub(r"\D", "", text).lstrip("0") or "0"
+
+
+def _one_slip_apart(read: float, solved: float) -> bool:
+    """Could ``read`` be ``solved`` misread once?
+
+    This is what keeps a repair honest. The arithmetic can always *solve* for a
+    missing value, but solving alone would let the pipeline write any number it
+    liked over what the page says. So a correction is only accepted when it is
+    also a plausible *misreading* — one digit dropped, one digit added, or one
+    digit read as another. Those are the slips a reader actually makes; a rate
+    of 25,000 read as 2,500 is one of them, and it is the error the customer
+    found on their invoice.
+
+    Anything further away is left alone and flagged, because at that distance
+    the honest answer is "a human should look", not a confident replacement.
+    """
+    left, right = _digits(read), _digits(solved)
+    if left == right:
+        # Same digits, different magnitude: a decimal point in the wrong place.
+        return True
+    if abs(len(left) - len(right)) > 1:
+        return False
+    if len(left) == len(right):
+        return sum(1 for a, b in zip(left, right) if a != b) == 1
+    longer, shorter = (left, right) if len(left) > len(right) else (right, left)
+    return any(longer[:index] + longer[index + 1:] == shorter for index in range(len(longer)))
+
+
+def _repair_item(item: dict[str, Any], seen: set[str]) -> tuple[str, float, float] | None:
+    """Correct one misread figure in a row, when the evidence identifies it.
+
+    Returns ``(field, was, now)``, or ``None`` when nothing can be shown.
+
+    Solving for the missing value is the easy half. The hard half is knowing
+    *which* of the three figures was misread — on a row of round numbers, any
+    one of them can be made to fit by a single slip, and picking between them
+    at random would be worse than leaving the row flagged. So the candidates
+    are narrowed by evidence, in order of how much the evidence proves:
+
+    1. **The second reader.** A figure it also saw on the page is not the
+       misreading, and a correction it *did* see is not an invention — it is
+       the same pixels read the other way. This is the only rung that settles
+       the matter outright, and it needs the local reader installed.
+    2. **The direction of the slip.** A reader drops a digit far more often
+       than it adds one, so a correction that lengthens the number is more
+       likely than one that shortens it.
+    3. **Where the slip fits.** Losing a digit from a five-figure rate is a
+       likelier accident than losing one from a single-digit quantity, so the
+       longer figure is the suspect.
+
+    If those still leave two equally good stories, nothing is written and the
+    row stays flagged for a human. Reporting doubt is part of the job.
+    """
+    qty, price, total = item.get("qty"), item.get("unit_price"), item.get("line_total")
+    if qty is None or price is None or total is None or _close(qty * price, total):
+        return None
+
+    found: list[tuple[str, float, float]] = []
+    if price:
+        solved = round(total / price, 4)
+        if solved > 0 and _one_slip_apart(qty, solved):
+            found.append(("qty", qty, solved))
+    if qty:
+        solved = round(total / qty, 4)
+        if solved > 0 and _one_slip_apart(price, solved):
+            found.append(("unit_price", price, solved))
+    solved = round(qty * price, 2)
+    if solved > 0 and _one_slip_apart(total, solved):
+        found.append(("line_total", total, solved))
+    if not found:
+        return None
+
+    if seen:
+        # A figure the page demonstrably carries is not the one that was misread.
+        standing = [entry for entry in found if not _grounded(entry[1], seen)]
+        # A correction the page demonstrably carries is the reading to take.
+        confirmed = [entry for entry in standing if _grounded(entry[2], seen)]
+        found = confirmed or standing or found
+
+    if len(found) > 1:
+        lengthened = [entry for entry in found if len(_digits(entry[2])) > len(_digits(entry[1]))]
+        found = lengthened or found
+    if len(found) > 1:
+        longest = max(len(_digits(entry[1])) for entry in found)
+        found = [entry for entry in found if len(_digits(entry[1])) == longest]
+    if len(found) != 1:
+        return None
+
+    field, was, now = found[0]
+    item[field] = now
+    item["review"][field] = True
+    item["notes"][field] = (
+        f"Read as {was:g}; corrected to {now:g} — one misread digit away, and the "
+        f"only reading that makes quantity x price equal the line total"
+    )
+    return found[0]
+
+
+def check_arithmetic(document: dict[str, Any], seen: set[str] | None = None) -> list[str]:
+    """Cross-check the model's own numbers. Repairs what it can show, flags the rest."""
     errors: list[str] = []
     amounts: list[float] = []
+    seen = seen or set()
     for number, item in enumerate(document.get("items") or [], start=1):
+        repaired = _repair_item(item, seen)
+        if repaired is not None:
+            field, was, now = repaired
+            message = (
+                f"Item {number}: {field} read as {was:g} corrected to {now:g} — "
+                "quantity x price now equals the line total."
+            )
+            errors.append(message)
+            # Kept on the document so the workbook can say how many figures it
+            # rewrote. A silent correction is a correction nobody can audit.
+            document.setdefault("repaired", []).append(message)
         qty = item.get("qty")
         price = item.get("unit_price")
         total = item.get("line_total")
@@ -349,7 +463,12 @@ def validate(
     corroborates.
     """
     document, shape_errors = _normalise(payload)
-    arithmetic_errors = check_arithmetic(document)
+    # Whether anything actually corroborated these figures against the pixels.
+    # Recorded rather than assumed: when the local reader is not installed the
+    # third gate silently passes everything, and a page nothing checked must not
+    # look on the review sheet like a page that was checked and found clean.
+    document["evidence_checked"] = bool(seen) and evidence_enabled()
+    arithmetic_errors = check_arithmetic(document, seen)
     grounding_errors = check_grounding(document, seen)
     blocking = list(shape_errors) + list(arithmetic_errors)
     if not document.get("items") and not document.get("header") and not document.get("totals"):
@@ -362,6 +481,11 @@ def validate(
     advisory = list(grounding_errors) + [
         f"table: {note}" for note in (payload.get("diagnostics") or [])
     ][:20]
+    if not document["evidence_checked"]:
+        advisory.append(
+            "no independent reading of this page was available, so no figure was "
+            "checked against the pixels — install the local reader to enable it"
+        )
     return document, blocking, advisory
 
 
@@ -487,7 +611,7 @@ def merge_pages(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
         # replaces are cleared rather than left standing.
         document["totals_review"] = {}
         document["totals_notes"] = {}
-        check_arithmetic(document)
+        check_arithmetic(document)  # the page's own evidence is long gone by now
     return merged
 
 

@@ -83,17 +83,66 @@ class ShapeTests(unittest.TestCase):
 
 
 class ArithmeticTests(unittest.TestCase):
-    def test_row_that_does_not_multiply_is_flagged_on_the_cells(self):
+    def test_a_row_no_single_slip_explains_is_flagged_on_every_cell(self):
+        # 2 x 15.5 is nowhere near 999, and no one misread digit gets it there,
+        # so all three cells are marked: any of them could be the wrong one.
         broken = payload(items=[
-            {"description": "قلم", "qty": 2, "unit_price": 15.5, "line_total": 34.0},
+            {"description": "قلم", "qty": 2, "unit_price": 15.5, "line_total": 999.0},
         ], totals={})
         document, blocking, _ = ai_extract.validate(broken, set())
         self.assertTrue(any("not the printed line total" in message for message in blocking))
         item = document["items"][0]
-        # All three cells are marked, because any one of them could be the misread.
+        self.assertEqual(item["line_total"], 999.0, "an unprovable value was overwritten")
         self.assertTrue(item["review"]["qty"])
         self.assertTrue(item["review"]["unit_price"])
         self.assertTrue(item["review"]["line_total"])
+
+    def test_a_misread_digit_the_arithmetic_can_prove_is_corrected(self):
+        # 34 is one digit away from 31, and nothing else on the row is. The
+        # correction is not a guess: it is the only reading that multiplies.
+        broken = payload(items=[
+            {"description": "قلم", "qty": 2, "unit_price": 15.5, "line_total": 34.0},
+        ], totals={})
+        document, blocking, _ = ai_extract.validate(broken, set())
+        item = document["items"][0]
+        self.assertEqual(item["line_total"], 31.0)
+        self.assertTrue(item["review"]["line_total"], "a corrected cell must still be marked")
+        self.assertIn("34", item["notes"]["line_total"], "the note must say what was read")
+        self.assertTrue(any("corrected" in message for message in blocking))
+
+    def test_the_customers_own_error_is_corrected(self):
+        """A rate of ٢٥٠٠٠ transcribed as 2500, which is what they hit.
+
+        The quantity and the taxable value pin the rate exactly, and 2500 is one
+        dropped digit from 25000 — so the page is readable after all.
+        """
+        broken = payload(items=[
+            {"description": "دبل إنسبيرون", "qty": 2, "unit_price": 2500.0,
+             "line_total": 50000.0},
+        ], totals={})
+        document, _blocking, _advisory = ai_extract.validate(broken, set())
+        self.assertEqual(document["items"][0]["unit_price"], 25000.0)
+
+    def test_an_ambiguous_row_is_never_rewritten(self):
+        # 3 x 4 = 120 could be a slip in any of the three. Silence beats a guess.
+        broken = payload(items=[
+            {"description": "قلم", "qty": 3, "unit_price": 4.0, "line_total": 120.0},
+        ], totals={})
+        document, _blocking, _advisory = ai_extract.validate(broken, set())
+        item = document["items"][0]
+        self.assertEqual((item["qty"], item["unit_price"], item["line_total"]), (3.0, 4.0, 120.0))
+
+    def test_the_second_reader_settles_which_figure_was_misread(self):
+        # The page carries 25000 and 50000; it does not carry 2500. That is what
+        # says the rate is the misreading and not the taxable value.
+        seen = ai_extract.page_numbers([word(text) for text in ("2", "25000", "50000")])
+        broken = payload(items=[
+            {"description": "دبل إنسبيرون", "qty": 2, "unit_price": 2500.0,
+             "line_total": 50000.0},
+        ], totals={})
+        document, _blocking, _advisory = ai_extract.validate(broken, seen)
+        self.assertEqual(document["items"][0]["unit_price"], 25000.0)
+        self.assertEqual(document["items"][0]["line_total"], 50000.0)
 
     def test_items_that_do_not_sum_to_subtotal_flag_the_subtotal(self):
         broken = payload(totals={"subtotal": 99.0, "grand_total": 99.0})
@@ -166,9 +215,12 @@ class GroundingTests(unittest.TestCase):
 
     def test_grounding_is_skipped_when_ocr_read_nothing(self):
         # With no OCR evidence at all, every number would look invented.
-        _document, blocking, advisory = ai_extract.validate(payload(), set())
-        self.assertEqual(advisory, [])
+        document, blocking, advisory = ai_extract.validate(payload(), set())
+        self.assertFalse([note for note in advisory if "not in the OCR reading" in note])
         self.assertEqual(blocking, [])
+        # But the page must not then be reported as one that passed the check.
+        self.assertFalse(document["evidence_checked"])
+        self.assertTrue(any("no independent reading" in note for note in advisory))
 
 
 class EvidenceIsAdvisoryTests(unittest.TestCase):
@@ -200,7 +252,7 @@ class EvidenceIsAdvisoryTests(unittest.TestCase):
     def test_arithmetic_still_blocks(self):
         # The gate that proves rather than corroborates keeps its teeth.
         broken = payload(items=[
-            {"description": "قلم", "qty": 2, "unit_price": 15.5, "line_total": 34.0},
+            {"description": "قلم", "qty": 2, "unit_price": 15.5, "line_total": 999.0},
         ], totals={})
         _document, blocking, _advisory = ai_extract.validate(broken, self.unseen)
         self.assertTrue(blocking, "a line total that does not multiply was accepted")
@@ -212,7 +264,12 @@ class EvidenceIsAdvisoryTests(unittest.TestCase):
         os.environ["VERTEX_EVIDENCE_OCR"] = "off"
         try:
             _document, _blocking, advisory = ai_extract.validate(payload(), self.unseen)
-            self.assertEqual(advisory, [], "grounding ran while switched off")
+            # The page's own figures are no longer questioned. The one remaining
+            # note says the check did not run, which is the point of saying it.
+            self.assertFalse(
+                [note for note in advisory if "not in the OCR reading" in note],
+                "grounding ran while switched off",
+            )
         finally:
             if previous is None:
                 os.environ.pop("VERTEX_EVIDENCE_OCR", None)

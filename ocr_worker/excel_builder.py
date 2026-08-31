@@ -137,6 +137,18 @@ _TEXT: dict[str, tuple[str, str]] = {
         "كل رقم له ما يقابله في قراءة مستقلة للصورة",
         "Every figure has a match in an independent reading of the image",
     ),
+    # Said plainly when the check did not run. A page nothing verified must not
+    # read like a page that was verified and found clean.
+    "pixels_off": (
+        "لم تجرِ قراءة مستقلة لهذه الصفحة — لم يُقابَل أي رقم بالصورة",
+        "No independent reading was available — no figure was checked against the image",
+    ),
+    "repaired": ("قيم صُحّحت بالحساب", "Corrected by arithmetic"),
+    "repaired_note": (
+        "رقم قُرئ خطأً وأثبت الحساب قيمته الصحيحة؛ الخلية مُعلَّمة وفيها ملاحظة بما تغيّر",
+        "A misread figure whose correct value the arithmetic proved; the cell is "
+        "highlighted and carries a note saying what changed",
+    ),
     "needs_review": ("يحتاج مراجعة", "Needs review"),
     "all_clean": (
         "لا شيء. كل قيمة لها دليل في الصورة وحسابها صحيح.",
@@ -897,7 +909,17 @@ def _write_summary(book, styles, source: Path, documents, records: int,
     # Named so the reviewer knows what the absence of a flag actually means.
     row = pair(row, say("shape"), say("shape_note"))
     row = pair(row, say("arithmetic"), say("arithmetic_note"))
-    row = pair(row, say("pixels"), say("pixels_note"))
+    # Only claimed when it happened. The check needs the local reader, and on a
+    # server without it the gate passes everything in silence.
+    checked = all(d.get("evidence_checked") for d in documents) if documents else False
+    row = pair(row, say("pixels"), say("pixels_note") if checked else say("pixels_off"))
+    if not checked:
+        sheet.cell(row - 1, 2).fill = styles["yellow"]
+    # A figure the arithmetic proved was misread and rewrote. Counted here
+    # because a correction nobody can see is a correction nobody can audit.
+    corrections = sum(len(document.get("repaired") or []) for document in documents)
+    if corrections:
+        row = pair(row, f"{say('repaired')} ({corrections})", say("repaired_note"))
     row += 1
 
     row = band_row(row, say("needs_review"))
