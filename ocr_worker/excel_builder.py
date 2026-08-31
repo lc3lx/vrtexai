@@ -467,6 +467,13 @@ def _text_alignment(text: Any, *, wrap: bool = False, vertical: str = "top"):
     )
 
 
+def _amount(value: Any) -> float:
+    """A recorded total as a number, so the next formula can build on it."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    return float(value)
+
+
 def _as_number(value: Any) -> float | None:
     """A cell's value as a number, or ``None`` when the cell is not just a number.
 
@@ -532,6 +539,7 @@ def _write_page(
     source: Path,
     destination: Path,
     styles: dict[str, Any],
+    cache: dict[str, Any] | None = None,
 ) -> tuple[int, int, list[dict[str, Any]]]:
     """Render one page. Returns (records, flagged rows, review items)."""
     from openpyxl.comments import Comment
@@ -555,6 +563,10 @@ def _write_page(
     widths: dict[int, int] = {}
     review_items: list[dict[str, Any]] = []
     records = flagged = 0
+    # What each formula works out to, so the cell shows a number even where
+    # nothing recalculates it. See :mod:`formula_cache`.
+    results: dict[str, Any] = {} if cache is None else cache.setdefault(sheet.title, {})
+    line_sum = 0.0
 
     header = document.get("header") or {}
     header_columns = plan_header_columns(document)
@@ -690,6 +702,8 @@ def _write_page(
                             f"={_column_letter(qty_column)}{row}*{_column_letter(price_column)}{row}",
                         )
                         is_formula = True
+                        results[cell.coordinate] = qty * price
+                        line_sum += qty * price
                         if value is not None:
                             cell.comment = Comment(
                                 f"{say('read_value')}: {value:,.2f}", "Vertex"
@@ -703,6 +717,8 @@ def _write_page(
                     # be text sitting in a column of figures, which is exactly
                     # what makes a total stop adding up.
                     cell = sheet.cell(row, index, value)
+                    if role == "line_total" and isinstance(value, (int, float)):
+                        line_sum += float(value)
                     _track(widths, index, _shown(value))
                 else:
                     text = str(value).strip() if value not in (None, "") else MISSING
@@ -773,6 +789,7 @@ def _write_page(
         )
         label_column = max(1, value_column - 1)
         written: dict[str, int] = {}
+        totals_results: dict[str, Any] = {}
         for key in _TOTAL_ORDER:
             if key not in totals and not (key == "subtotal" and first_item_row):
                 continue
@@ -788,22 +805,32 @@ def _write_page(
             _track(widths, label_column, label_cell.value)
 
             formula = None
+            computed = None
             if key == "subtotal" and total_column and first_item_row and last_item_row:
                 letter = _column_letter(total_column)
                 formula = f"=SUM({letter}{first_item_row}:{letter}{last_item_row})"
+                computed = line_sum
             elif key == "tax_amount" and "subtotal" in written and totals.get("tax_rate"):
                 letter = _column_letter(value_column)
-                formula = f"={letter}{written['subtotal']}*{float(totals['tax_rate'])}"
+                rate = float(totals["tax_rate"])
+                formula = f"={letter}{written['subtotal']}*{rate}"
+                computed = _amount(totals_results.get("subtotal")) * rate
             elif is_grand and "subtotal" in written:
                 letter = _column_letter(value_column)
                 parts = [f"{letter}{written['subtotal']}"]
+                computed = _amount(totals_results.get("subtotal"))
                 if "tax_amount" in written:
                     parts.append(f"+{letter}{written['tax_amount']}")
+                    computed += _amount(totals_results.get("tax_amount"))
                 if "discount" in written:
                     parts.append(f"-ABS({letter}{written['discount']})")
+                    computed -= abs(_amount(totals_results.get("discount")))
                 formula = "=" + "".join(parts)
 
             value_cell = sheet.cell(row, value_column, formula if formula else value)
+            totals_results[key] = computed if computed is not None else value
+            if formula is not None and computed is not None:
+                results[value_cell.coordinate] = computed
             _style_cell(value_cell, border=thin, bold=True, size=12 if is_grand else 11)
             value_cell.number_format = currency
             value_cell.alignment = Alignment(horizontal="right")
@@ -1006,6 +1033,11 @@ def write_ai_workbook(
 
     import document_sheet
 
+    # What every formula works out to, gathered as the sheets are written and
+    # stored into the file afterwards. Without it a formula cell shows empty
+    # anywhere that will not recalculate — Excel's Protected View above all,
+    # which is how a downloaded workbook always opens.
+    cache: dict[str, dict[str, Any]] = {}
     records = low = 0
     review_items: list[dict[str, Any]] = []
     taken: set[str] = set()
@@ -1019,7 +1051,7 @@ def write_ai_workbook(
     for index, document in enumerate(documents, start=1):
         sheet = book.create_sheet(title=_sheet_title(source, index, len(documents), taken))
         page_records, page_low, page_review = document_sheet.write_document(
-            sheet, document, source, destination, styles
+            sheet, document, source, destination, styles, cache
         )
         records += page_records
         low += page_low
@@ -1035,7 +1067,7 @@ def write_ai_workbook(
             continue
         say = document_words(document)
         sheet = book.create_sheet(title=_data_sheet_title(say("data_sheet"), index, taken))
-        _write_page(sheet, document, source, destination, styles)
+        _write_page(sheet, document, source, destination, styles, cache)
 
     if not book.worksheets:
         sheet = book.create_sheet(title="Extracted")
@@ -1048,6 +1080,11 @@ def write_ai_workbook(
     book.active = 0
 
     destination = _save_workbook(book, destination)
+    # The formulas keep their answers, so the numbers are visible before
+    # anything recalculates. See :mod:`formula_cache`.
+    from formula_cache import cache_formula_values
+
+    cache_formula_values(destination, cache)
     for item in review_items:
         item["output"] = str(destination)
     kind = str((documents[0] if documents else {}).get("document_type") or "document")

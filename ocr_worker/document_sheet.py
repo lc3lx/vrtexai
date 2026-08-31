@@ -86,8 +86,15 @@ def write_document(
     source: Path,
     destination: Path,
     styles: dict[str, Any],
+    cache: dict[str, Any] | None = None,
 ) -> tuple[int, int, list[dict[str, Any]]]:
-    """Write one page into one sheet. Returns (records, flagged, review items)."""
+    """Write one page into one sheet. Returns (records, flagged, review items).
+
+    ``cache`` collects what each formula works out to, keyed by cell. openpyxl
+    stores a formula with no result, and a viewer that will not recalculate —
+    Excel's Protected View, a phone, a mail preview — then shows the cell empty.
+    See :mod:`formula_cache`.
+    """
     from openpyxl.comments import Comment
     from openpyxl.styles import Alignment, Border, Font, Side
 
@@ -115,8 +122,17 @@ def write_document(
     records = flagged = 0
     row = 1
 
+    results: dict[str, Any] = {} if cache is None else cache.setdefault(sheet.title, {})
+
     def track(column: int, text: Any) -> None:
         builder._track(widths, column, text)
+
+    def formula_cell(at_row: int, column: int, text: str, result: Any):
+        """A live formula that still shows its answer without recalculating."""
+        cell = sheet.cell(at_row, column, text)
+        if isinstance(result, (int, float)) and not isinstance(result, bool):
+            results[cell.coordinate] = result
+        return cell
 
     def flag(at_row: int, column: int, heading: str, value: Any, note: str) -> None:
         review_items.append({
@@ -237,6 +253,7 @@ def write_document(
         row += 1
 
         first = row
+        line_sum = 0.0
         qty_column = role_columns.get("qty")
         price_column = role_columns.get("unit_price")
         total_column = role_columns.get("line_total")
@@ -259,10 +276,13 @@ def write_document(
                     qty, price = item.get("qty"), item.get("unit_price")
                     if qty is not None and price is not None:
                         letter = builder._column_letter
-                        cell = sheet.cell(
-                            row, index, f"={letter(qty_column)}{row}*{letter(price_column)}{row}"
+                        cell = formula_cell(
+                            row, index,
+                            f"={letter(qty_column)}{row}*{letter(price_column)}{row}",
+                            qty * price,
                         )
                         is_formula = True
+                        line_sum += qty * price
                         if value is not None:
                             cell.comment = Comment(f"{say('read_value')}: {value:,.2f}", "Vertex")
                         track(index, builder._shown(value if value is not None else qty * price))
@@ -271,6 +291,8 @@ def write_document(
                         track(index, builder._shown(value))
                 elif numeric:
                     cell = sheet.cell(row, index, value)
+                    if role == "line_total" and isinstance(value, (int, float)):
+                        line_sum += float(value)
                     track(index, builder._shown(value))
                 else:
                     text = str(value).strip() if value not in (None, "") else ""
@@ -313,6 +335,7 @@ def write_document(
             row += 1
 
         last = row - 1
+        state["line_sum"] = line_sum
         sheet.auto_filter.ref = f"A{header_row}:{builder._column_letter(len(fields))}{last}"
 
         # The line the page prints under its own table — "مجموع | 20 | 144,400"
@@ -354,6 +377,8 @@ def write_document(
         total_column = role_columns.get("line_total") or max(2, min(width, item_width or width))
         label_column = max(1, total_column - 1)
         written: dict[str, int] = {}
+        results: dict[str, Any] = {}
+        results: dict[str, Any] = {}
 
         for key in builder._TOTAL_ORDER:
             if key not in totals and not (key == "subtotal" and first):
@@ -370,25 +395,37 @@ def write_document(
             label_cell.alignment = Alignment(horizontal="left" if rtl else "right")
             track(label_column, label_cell.value)
 
-            formula = None
+            # Each formula is written with the answer it works out to, so the
+            # cell shows a number even where nothing will recalculate it.
+            expression = computed = None
             letter = builder._column_letter(total_column)
             if key == "subtotal" and first and last and role_columns.get("line_total"):
-                formula = f"=SUM({letter}{first}:{letter}{last})"
+                expression = f"=SUM({letter}{first}:{letter}{last})"
+                computed = state.get("line_sum")
             elif key == "tax_amount" and "subtotal" in written and totals.get("tax_rate"):
-                formula = f"={letter}{written['subtotal']}*{float(totals['tax_rate'])}"
+                rate = float(totals["tax_rate"])
+                expression = f"={letter}{written['subtotal']}*{rate}"
+                computed = _amount(results.get("subtotal")) * rate
             elif is_grand and "subtotal" in written:
                 parts = [f"{letter}{written['subtotal']}"]
+                computed = _amount(results.get("subtotal"))
                 if "tax_amount" in written:
                     parts.append(f"+{letter}{written['tax_amount']}")
+                    computed += _amount(results.get("tax_amount"))
                 if "discount" in written:
                     parts.append(f"-ABS({letter}{written['discount']})")
-                formula = "=" + "".join(parts)
+                    computed -= abs(_amount(results.get("discount")))
+                expression = "=" + "".join(parts)
 
-            value_cell = sheet.cell(row, total_column, formula if formula else value)
+            value_cell = (
+                formula_cell(row, total_column, expression, computed)
+                if expression else sheet.cell(row, total_column, value)
+            )
+            results[key] = computed if computed is not None else value
             builder._style_cell(value_cell, border=thin, bold=True, size=12 if is_grand else 11)
             value_cell.number_format = currency
             value_cell.alignment = builder._number_alignment()
-            if formula is not None and value is not None:
+            if expression is not None and value is not None:
                 value_cell.comment = Comment(f"{say('read_value')}: {value:,.2f}", "Vertex")
             track(total_column, builder._shown(value))
             if is_grand:
@@ -398,12 +435,12 @@ def write_document(
                     bottom=Side(style="double", color=builder.BAND),
                 )
             note = notes.get(key)
-            if note and formula is None:
+            if note and expression is None:
                 value_cell.comment = Comment(str(note), "Vertex")
             if review.get(key):
                 value_cell.fill = yellow
                 flagged += 1
-                if formula is None:
+                if expression is None:
                     flag(row, total_column, str(label_cell.value), value, str(note or ""))
             written[key] = row
             row += 1
@@ -483,6 +520,13 @@ def write_document(
     sheet.sheet_properties.pageSetUpPr.fitToPage = True
     sheet.print_options.horizontalCentered = True
     return records, flagged, review_items
+
+
+def _amount(value: Any) -> float:
+    """A recorded total as a number, so the next formula can build on it."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    return float(value)
 
 
 def _plain_number(text: Any) -> float | None:

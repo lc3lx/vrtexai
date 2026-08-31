@@ -72,6 +72,7 @@ def build(html: str = INVOICE_7):
     destination = Path(directory.name) / "7.xlsx"
     result = excel_builder.write_ai_workbook(destination, Path("7.png"), documents)
     book = load_workbook(result[4])
+    book.saved_path = result[4]
     return payload, document, blocking, book, directory
 
 
@@ -223,6 +224,30 @@ class ValueTests(unittest.TestCase):
         self.assertEqual(cell.value, 0.05)
         self.assertIn("%", cell.number_format)
 
+    def test_every_formula_shows_its_answer_without_recalculating(self):
+        """What a viewer in Protected View sees.
+
+        That is where the customer found an empty Amount column, an empty
+        Subtotal and an empty Total: nothing recalculates there, so a formula
+        with no stored result shows nothing at all. ``data_only=True`` reads the
+        file that same way.
+        """
+        from openpyxl import load_workbook
+
+        stored = load_workbook(self.book.saved_path, data_only=True)
+        self.addCleanup(stored.close)
+        checked = 0
+        for sheet in self.book.worksheets:
+            for row in sheet.iter_rows():
+                for cell in row:
+                    if isinstance(cell.value, str) and cell.value.startswith("="):
+                        seen = stored[sheet.title][cell.coordinate].value
+                        self.assertIsNotNone(
+                            seen, f"{sheet.title}!{cell.coordinate} would show empty"
+                        )
+                        checked += 1
+        self.assertGreater(checked, 0, "no formula was written at all")
+
     def test_the_line_total_is_a_live_formula(self):
         row = next(
             cell.row for cell in self.sheet["C"]
@@ -316,6 +341,16 @@ class ManifestTests(unittest.TestCase):
         formula = self.sheet.cell(row, 5).value
         self.assertTrue(str(formula).startswith("=SUM("))
         self.assertIn("$", self.sheet.cell(row, 5).number_format)
+
+    def test_the_calculated_total_shows_its_figure(self):
+        # It came back blank: a formula with no stored result shows nothing
+        # wherever nothing recalculates, which is where the customer opened it.
+        from openpyxl import load_workbook
+
+        stored = load_workbook(self.book.saved_path, data_only=True)
+        self.addCleanup(stored.close)
+        row = self.row_of("Total (calculated)")
+        self.assertEqual(stored[self.sheet.title].cell(row, 5).value, 26100)
 
 
 class SplitLineTests(unittest.TestCase):
