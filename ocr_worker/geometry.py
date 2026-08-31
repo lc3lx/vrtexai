@@ -207,7 +207,8 @@ _TOTAL_LABELS: list[tuple[str, re.Pattern[str]]] = [
     # 943.00" is read as what is owed while "Due Date: 2025-11-10" — which is
     # tried against these patterns first — is left for the header fields.
     ("grand_total", re.compile(
-        r"grand\s*total|total\s*due|amount\s*due|balance\s*due|net\s*total|invoice\s*total"
+        r"grand\s*total|total\s*due|amount\s*due|balance\s*due|net\s*total"
+        r"|invoice\s*total|total\s*invoice(?:\s*value|\s*amount)?"
         r"|^due$|^total$"
         r"|الإجمالي\s*النهائي|المبلغ\s*المستحق|^المستحق$|مبلغ\s*الفاتورة|إجمالي\s*الفاتورة"
         r"|المجموع\s*الكلي|صافي\s*الفاتورة|^الإجمالي$", re.I)),

@@ -338,6 +338,20 @@ def check_arithmetic(document: dict[str, Any], seen: set[str] | None = None) -> 
             document["totals_notes"]["subtotal"] = (
                 f"The items read add up to {summed:g}, not the subtotal {subtotal:g}"
             )
+    elif amounts and subtotal is None and grand is not None and not tax and not discount:
+        # A page that prints one total and no subtotal — an export invoice
+        # states "TOTAL INVOICE VALUE" and nothing else. Without this the lines
+        # were never compared against anything at all, so a misread amount
+        # passed every gate on a document that plainly disagreed with itself.
+        summed = round(sum(amounts), 2)
+        if not _close(summed, grand, tolerance=0.05):
+            errors.append(
+                f"The items add up to {summed:g}, which is not the total {grand:g}."
+            )
+            document["totals_review"]["grand_total"] = True
+            document["totals_notes"]["grand_total"] = (
+                f"The items read add up to {summed:g}, not the total {grand:g}"
+            )
 
     if subtotal is not None and grand is not None:
         base = subtotal + (tax or 0.0)

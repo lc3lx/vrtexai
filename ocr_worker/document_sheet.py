@@ -252,17 +252,38 @@ def write_document(
         sheet.row_dimensions[row].height = 20
         row += 1
 
-        first = row
+        first = 0
+        striping_from = row
         line_sum = 0.0
         qty_column = role_columns.get("qty")
         price_column = role_columns.get("unit_price")
         total_column = role_columns.get("line_total")
         can_compute = bool(qty_column and price_column and total_column)
 
+        group = ""
         for item in items:
             reviews = item.get("review") or {}
             notes = item.get("notes") or {}
             painted = False
+
+            # A heading the page printed across its own table, grouping the rows
+            # under it — "PO NO # 1816644 DC # 995". Written where it was
+            # printed, because on an export invoice the purchase orders are the
+            # structure of the document, not decoration on it.
+            if item.get("_group") and item["_group"] != group:
+                group = str(item["_group"])
+                heading = sheet.cell(row, 1, group)
+                builder._style_cell(heading, border=thin, bold=True)
+                heading.fill = label_fill
+                heading.alignment = builder._text_alignment(group)
+                for column in range(2, len(fields) + 1):
+                    builder._style_cell(sheet.cell(row, column), border=thin)
+                    sheet.cell(row, column).fill = label_fill
+                if len(fields) > 1:
+                    sheet.merge_cells(start_row=row, start_column=1,
+                                      end_row=row, end_column=len(fields))
+                track(1, group[:30])
+                row += 1
             for index, (field, heading, role) in enumerate(fields, start=1):
                 value = item.get(field)
                 numeric = role in builder.MONEY_ROLES or role in builder.QTY_ROLES
@@ -300,7 +321,7 @@ def write_document(
                     track(index, text)
 
                 builder._style_cell(cell, border=thin)
-                if stripe is not None and (row - first) % 2 == 1:
+                if stripe is not None and (row - striping_from) % 2 == 1:
                     cell.fill = stripe
                 if field in percent_fields:
                     cell.number_format = builder.PERCENT_FORMAT
@@ -339,6 +360,7 @@ def write_document(
             records += 1
             if painted:
                 flagged += 1
+            first = first or row
             row += 1
 
         last = row - 1
@@ -388,7 +410,12 @@ def write_document(
         results: dict[str, Any] = {}
 
         for key in builder._TOTAL_ORDER:
-            if key not in totals and not (key == "subtotal" and first):
+            # The sheet adds the column up only when the page printed no sum of
+            # its own. A document that states its total gets that total, not a
+            # second one beside it.
+            if key not in totals and not (
+                key == "subtotal" and first and "grand_total" not in totals
+            ):
                 continue
             value = totals.get(key)
             printed = key in totals
@@ -413,7 +440,7 @@ def write_document(
                 rate = float(totals["tax_rate"])
                 expression = f"={letter}{written['subtotal']}*{rate}"
                 computed = _amount(results.get("subtotal")) * rate
-            elif is_grand and "subtotal" in written:
+            elif is_grand and "subtotal" in written and "subtotal" in totals:
                 parts = [f"{letter}{written['subtotal']}"]
                 computed = _amount(results.get("subtotal"))
                 if "tax_amount" in written:
@@ -536,8 +563,23 @@ def _amount(value: Any) -> float:
     return float(value)
 
 
+# A bare run of this many digits, with no decimal part and no separators, is
+# something's number rather than a quantity of something: an I.E. code, an HS
+# code, an account, a reference. Turning it into a number risks 3.31401E+09 on
+# screen and means nothing useful even when it does not.
+IDENTIFIER_DIGITS = 7
+
+
 def _plain_number(text: Any) -> float | None:
-    """A cell that is only a number, so a table's figures stay numbers."""
+    """A cell of a general table as a number, when it really is one."""
+    import re as _re
+
     from table_shape import numeric_cell
 
-    return numeric_cell(text)
+    value = numeric_cell(text)
+    if value is None:
+        return None
+    body = str(text or "").strip()
+    if _re.fullmatch(rf"\d{{{IDENTIFIER_DIGITS},}}", body):
+        return None
+    return value

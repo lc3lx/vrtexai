@@ -93,13 +93,21 @@ class Grid:
 # Rebuilding the grid
 # --------------------------------------------------------------------------
 def _cell_text(chunk: str) -> str:
-    """The visible text of one cell."""
-    text = _BREAK.sub(" ", chunk)
+    """The visible text of one cell, line breaks and all.
+
+    A break inside a cell is kept as one: an exporter's address is printed on
+    four lines inside a single box, and flattening it to "M/S HOME DECOR NEAR
+    ALISHAN PALACE MANSOOR COLONY SAHARANPUR 247001 UTTAR PRADESH INDIA" turns a
+    readable block into a smear. Excel wraps on the break, so the cell reads the
+    way the box does.
+    """
+    text = _BREAK.sub("\n", chunk)
     text = _TAG.sub(" ", text)
-    # Entities are decoded here and nowhere else. A company printed as
-    # "Bags &amp; Cases" reached the workbook with the escape still in it.
+    # Entities are decoded here. A company printed as "Bags &amp; Cases" reached
+    # the workbook with the escape still in it.
     text = html_module.unescape(text)
-    return re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"[^\S\n]+", " ", text)
+    return re.sub(r"\s*\n\s*", "\n", text).strip()
 
 
 def _span_of(attributes: str, name: str) -> int:
@@ -350,11 +358,20 @@ def _header_texts(row: Sequence[Cell]) -> list[str]:
     return texts
 
 
+# A column name is short. Past this a cell is a paragraph — an exporter's
+# address block, a declaration — and a row of those is the document's contents,
+# not a heading over them. "Description Artistic, wooden iron & handicrafts" is
+# a real heading at 46 characters, so the line is drawn well clear of it.
+MAX_HEADING_LENGTH = 60
+
+
 def looks_like_header(row: Sequence[Cell]) -> bool:
     """Is this row naming the columns rather than carrying data?"""
     filled = [cell for cell in row if cell.filled]
     if len(filled) < 2:
         # A caption sitting above the grid must not be eaten as column names.
+        return False
+    if any(len(cell.text) > MAX_HEADING_LENGTH or "\n" in cell.text for cell in filled):
         return False
     if any(cell.header for cell in filled):
         return True

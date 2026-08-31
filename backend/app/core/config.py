@@ -98,7 +98,7 @@ class Settings:
         # answer stops mid-table with no error, which reads as a page that ended
         # early rather than one that was cut off.
         self.openrouter_max_tokens: int = max(
-            1000, int(os.environ.get("OPENROUTER_MAX_TOKENS", "8000") or 8000)
+            1000, int(os.environ.get("OPENROUTER_MAX_TOKENS", "24000") or 24000)
         )
         self.ai_service_url: str = os.environ.get("AI_SERVICE_URL", "").strip()
         # The shared secret this backend presents to the GPU service. Named for

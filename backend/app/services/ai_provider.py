@@ -496,9 +496,14 @@ def html_to_blocks(html: str) -> dict[str, Any]:
     blocks: list[dict[str, Any]] = []
     position = 0
 
+    import html as html_module
+
     def paragraphs(chunk: str) -> None:
         for paragraph in re.split(r"</?p[^>]*>|<br\s*/?>|\n{2,}", chunk):
-            stripped = re.sub(r"<[^>]+>", " ", paragraph)
+            # Entities are decoded in text exactly as they are in table cells.
+            # Without this "Signature &amp; Company Stamp" reached the workbook
+            # with the escape still in it.
+            stripped = html_module.unescape(re.sub(r"<[^>]+>", " ", paragraph))
             # Line breaks and tabs are tidied away; runs of spaces are not.
             # A page prints two fields on one line by putting white space
             # between them — "Invoice No: 1    Date: 12/27/2021" — and that gap

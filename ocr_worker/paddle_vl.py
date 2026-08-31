@@ -555,7 +555,8 @@ def _totals_from_lines(lines: list[str]) -> dict[str, float]:
     subtotal line gets read a second time as the grand total and the arithmetic
     gate then reports a mismatch that is not in the document.
     """
-    from verify import SUBTOTAL_LABEL, TAX_LABEL, TOTAL_LABEL, to_number
+    from table_shape import numeric_cell
+    from verify import SUBTOTAL_LABEL, TAX_LABEL, TOTAL_LABEL
 
     totals: dict[str, float] = {}
     remaining = list(lines)
@@ -566,10 +567,22 @@ def _totals_from_lines(lines: list[str]) -> dict[str, float]:
     ):
         for line in remaining:
             match = pattern.search(line)
-            if not match:
+            # A totals line *begins* with its label and ends with its amount.
+            # Searching a whole line for the word and taking whatever number
+            # came after it read "…SAHARANPUR 247001 UTTAR PRADESH INDIA" as a
+            # tax of 247,001 — a postcode out of an exporter's address, banked
+            # as a figure on the invoice.
+            if not match or match.start() > 30:
                 continue
-            # The amount is whatever number follows the label on that line.
-            value = to_number(line[match.end():])
+            # What follows the label, past the colon that ends it — the pattern
+            # matches "الإجمالي قبل" while the page printed "الإجمالي قبل
+            # الضريبة: 73.50", so the rest of the label has to be stepped over
+            # before the amount. What is left must be an amount and nothing
+            # else; anything looser reads an address as a figure.
+            tail = line[match.end():]
+            if re.search(r"[:：]", tail):
+                tail = re.split(r"[:：]", tail)[-1]
+            value = numeric_cell(tail.lstrip(" -–—\t"))
             if value is None:
                 continue
             totals[key] = value
@@ -654,6 +667,9 @@ def to_payload(page: dict[str, Any]) -> dict[str, Any]:
     # A totals line that carries one figure per column — "مجموع | 20 | 144,400 |
     # 148,060" — cannot be read until the columns have meanings, so it waits.
     column_totals: list[tuple[str, list[table_shape.Cell]]] = []
+    # Which heading each item sits under, when the table is grouped.
+    groups: dict[int, str] = {}
+    group = ""
     for row in body:
         kind, label, amount = table_shape.classify_row(row)
         if kind == table_shape.TOTAL:
@@ -663,8 +679,19 @@ def to_payload(page: dict[str, Any]) -> dict[str, Any]:
                 stated_totals.append((label, amount))
             else:
                 column_totals.append((label, list(row)))
+        elif kind == table_shape.SECTION:
+            # A heading printed across the table, grouping the rows beneath it:
+            # "PO NO # 1816644 DC # 995" on an export invoice. It was being
+            # dropped outright — six purchase orders gone from a document whose
+            # whole structure is the orders it covers.
+            group = label
         elif kind == table_shape.ITEM:
-            item_rows.append(row)
+            if group:
+                row = list(row)
+                item_rows.append(row)
+                groups[len(item_rows) - 1] = group
+            else:
+                item_rows.append(row)
     stated_totals.extend(table_shape.read_totals(totals_grids))
 
     # ---- the page's other tables and text --------------------------------
@@ -777,13 +804,19 @@ def to_payload(page: dict[str, Any]) -> dict[str, Any]:
                 },
             })
 
-        for row in item_rows:
+        for number, row in enumerate(item_rows):
             item: dict[str, Any] = {}
             for index, key in enumerate(keys):
                 value = row[index].text if index < len(row) else ""
                 item[key] = _numeric(value) if roles[index] in _NUMERIC_ROLES else value
-            if any(str(value).strip() for value in item.values() if value is not None):
-                items.append(item)
+            if not any(str(value).strip() for value in item.values() if value is not None):
+                continue
+            # Which heading the page printed this row under. Kept under a
+            # private name so it never becomes a column of its own; the sheet
+            # writes it back as the spanning row the page actually shows.
+            if number in groups:
+                item["_group"] = groups[number]
+            items.append(item)
 
     # ---- the page, resolved ----------------------------------------------
     # Each table section now knows what it turned out to be. The item grid is

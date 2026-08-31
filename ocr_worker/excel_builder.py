@@ -814,7 +814,12 @@ def _write_page(
         written: dict[str, int] = {}
         totals_results: dict[str, Any] = {}
         for key in _TOTAL_ORDER:
-            if key not in totals and not (key == "subtotal" and first_item_row):
+            # The sheet adds the column up only when the page printed no sum of
+            # its own. A document that states its total gets that total, not a
+            # second one beside it.
+            if key not in totals and not (
+                key == "subtotal" and first_item_row and "grand_total" not in totals
+            ):
                 continue
             value = totals.get(key)
             label_cell = sheet.cell(row, label_column, say(key, key))
@@ -838,7 +843,7 @@ def _write_page(
                 rate = float(totals["tax_rate"])
                 formula = f"={letter}{written['subtotal']}*{rate}"
                 computed = _amount(totals_results.get("subtotal")) * rate
-            elif is_grand and "subtotal" in written:
+            elif is_grand and "subtotal" in written and "subtotal" in totals:
                 letter = _column_letter(value_column)
                 parts = [f"{letter}{written['subtotal']}"]
                 computed = _amount(totals_results.get("subtotal"))

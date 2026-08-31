@@ -28,6 +28,7 @@ def _blocks_from_html(text: str) -> dict:
     diagnostic that only runs where the web backend happens to sit is no use on
     the machine where the problem is.
     """
+    import html as html_module
     import re
 
     body = re.sub(r"^\s*```(?:html)?|```\s*$", "", text.strip(), flags=re.MULTILINE)
@@ -38,7 +39,8 @@ def _blocks_from_html(text: str) -> dict:
         for paragraph in re.split(r"</?p[^>]*>|<br\s*/?>|\n{2,}", chunk):
             # Runs of spaces are kept: they are how a page separates two fields
             # printed on one line, and the splitter downstream reads them.
-            stripped = re.sub(r"[^\S ]+", " ", re.sub(r"<[^>]+>", " ", paragraph)).strip()
+            plain = html_module.unescape(re.sub(r"<[^>]+>", " ", paragraph))
+            stripped = re.sub(r"[^\S ]+", " ", plain).strip()
             if stripped:
                 blocks.append({"block_label": "text", "block_content": stripped})
 

@@ -436,3 +436,109 @@ class SplitLineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+EXPORT_INVOICE = """<p>EXPORT INVOICE GOH258</p>
+<table>
+<tr><td>Exporter (Private)<br>M/S HOME DECOR<br>NEAR ALISHAN PALACE MANSOOR COLONY SAHARANPUR 247001<br>UTTAR PRADESH INDIA</td><td>Invoice No.</td><td>EXP-03/2026/27</td></tr>
+<tr><td></td><td>Date</td><td>30-05-2025</td></tr>
+<tr><td></td><td>State of Origin of GSTIN#</td><td>UTTAR PRADESH 09AFVPR9216B1ZZ</td></tr>
+<tr><td></td><td>I.E. Code No &amp; BIN</td><td>3314011270</td></tr>
+</table>
+<table>
+<tr><td>HS Code</td><td>Buyer Ref.</td><td>Buyer PIO No.</td><td>Description Artistic, wooden iron &amp; handicrafts</td><td>Colour</td><td>Ship Quantity</td><td>Rate Fob $ US</td><td>AMOUNT USD</td></tr>
+<tr><td colspan="8">PO NO # 1816644 DC # 995</td></tr>
+<tr><td>44219990</td><td>97850595</td><td>1816644</td><td>19" INCH BEAD NOEL</td><td>WHITE</td><td>36</td><td>$ 3.15</td><td>113.40</td></tr>
+<tr><td>44219990</td><td>97850601</td><td>1816644</td><td>24" INCH WOOD WHITE WASH MERRY</td><td>NATURAL</td><td>36</td><td>$ 3.50</td><td>126.00</td></tr>
+<tr><td colspan="8">PO NO # 1816643 DC # 115</td></tr>
+<tr><td>44219990</td><td>97850595</td><td>1816643</td><td>19" INCH BEAD NOEL</td><td>WHITE</td><td>108</td><td>$ 3.15</td><td>340.20</td></tr>
+</table>
+<table>
+<tr><td>PARTICULARS</td><td>TOTAL</td></tr>
+<tr><td>TOTAL CARTONS</td><td>48</td></tr>
+<tr><td>TOTAL NET WEIGHT</td><td>692.000 KGS</td></tr>
+<tr><td>TOTAL INVOICE VALUE FOB (USD)</td><td>$ 579.60</td></tr>
+</table>
+<p>Authorized Signatory (Signature &amp; Company Stamp)</p>"""
+
+
+class ExportInvoiceTests(unittest.TestCase):
+    """A dense export invoice: grouped rows, address blocks, one printed total."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.payload, cls.document, cls.blocking, cls.book, cls._dir = build(EXPORT_INVOICE)
+        cls.sheet = cls.book.worksheets[0]
+        cls.text = "\n".join(
+            str(cell.value) for row in cls.sheet.iter_rows() for cell in row
+            if isinstance(cell.value, str)
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.book.close()
+        cls._dir.cleanup()
+
+    def row_of(self, text: str) -> int:
+        for row in self.sheet.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str) and cell.value.strip() == text:
+                    return cell.row
+        raise AssertionError(f"'{text}' is not on the sheet")
+
+    def test_the_purchase_order_headings_are_kept_where_they_were_printed(self):
+        """Six purchase orders were being dropped outright.
+
+        A heading printed across the table groups the rows beneath it, and on an
+        export invoice the orders it covers are the structure of the document.
+        """
+        first = self.row_of("PO NO # 1816644 DC # 995")
+        second = self.row_of("PO NO # 1816643 DC # 115")
+        self.assertEqual(self.sheet.cell(first + 1, 4).value, '19" INCH BEAD NOEL')
+        self.assertEqual(self.sheet.cell(first + 2, 4).value, '24" INCH WOOD WHITE WASH MERRY')
+        self.assertEqual(second, first + 3)
+        self.assertEqual(self.sheet.cell(second + 1, 3).value, "1816643")
+
+    def test_the_header_box_keeps_one_row_per_field(self):
+        # An address block is longer than any column name, so a row carrying one
+        # is the document's contents and not a heading over them.
+        first = self.row_of("Invoice No.")
+        self.assertEqual(self.sheet.cell(first, 3).value, "EXP-03/2026/27")
+        self.assertEqual(self.sheet.cell(first + 1, 2).value, "Date")
+        self.assertEqual(self.sheet.cell(first + 1, 3).value, "30-05-2025")
+        # An I.E. code is something's number, not a quantity of anything: kept
+        # as text so it is not shown as 3.31401E+09.
+        self.assertEqual(self.sheet.cell(first + 3, 3).value, "3314011270")
+
+    def test_an_address_block_keeps_its_line_breaks(self):
+        cell = self.sheet.cell(self.row_of("Invoice No."), 1)
+        self.assertIn("M/S HOME DECOR", str(cell.value))
+        self.assertIn("\n", str(cell.value), "the address was flattened into one line")
+
+    def test_a_postcode_in_an_address_is_not_banked_as_a_tax(self):
+        # "…SAHARANPUR 247001 UTTAR PRADESH INDIA" was read as a tax of 247,001.
+        self.assertNotIn("tax_amount", self.document["totals"])
+
+    def test_the_printed_total_is_the_total_and_is_not_overwritten(self):
+        # A grand total the page states is a fact. It used to be replaced by a
+        # formula pointing at a subtotal this product had invented.
+        self.assertEqual(self.document["totals"]["grand_total"], 579.60)
+        row = self.row_of("Total")
+        self.assertEqual(self.sheet.cell(row, 8).value, 579.60)
+
+    def test_only_one_total_row_is_written(self):
+        self.assertNotIn("Total (calculated)", self.text)
+
+    def test_the_lines_are_checked_against_the_printed_total(self):
+        # 113.40 + 126.00 + 340.20 = 579.60, so this page reconciles.
+        self.assertEqual(self.blocking, [])
+
+    def test_entities_are_decoded_in_text_as_well_as_in_tables(self):
+        self.assertIn("Signature & Company Stamp", self.text)
+        self.assertNotIn("&amp;", self.text)
+
+    def test_the_roles_are_resolved_without_a_template(self):
+        self.assertEqual(
+            self.payload["column_roles"],
+            ["sku", "other", "other", "description", "other", "qty", "unit_price", "line_total"],
+        )
