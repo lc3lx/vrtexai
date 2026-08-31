@@ -914,6 +914,92 @@ def assemble(grids: Sequence[Grid]) -> tuple[Grid, list[Grid], list[Grid]]:
     return items, totals, others
 
 
+_MAX_LABEL = 40
+
+
+def _is_label(cell: Cell) -> bool:
+    """Short text with no figure in it — the way a page writes a field name."""
+    text = cell.text.strip()
+    return bool(text) and len(text) <= _MAX_LABEL and numeric_cell(text) is None
+
+
+def field_pairs(grid: Grid) -> tuple[list[tuple[str, str]], list[str]]:
+    """The ``label, value`` a box of details states, and the text left over.
+
+    Boxes are laid out three ways and the difference matters, because getting
+    it wrong pairs one field's name with another field's value:
+
+    * **A cell carrying its own "label: value".** Two boxes printed side by side
+      come back as one two-column table, so pairing the row's cells joined the
+      left box's label to the right box's value.
+    * **A row of names over a row of values.** Shipping documents print
+      "Pre-Carriage By | Place of receipt | Country of Origin" and the answers
+      underneath. Read row by row that is two labels paired together —
+      "Port of Discharge" recorded as meaning "Place of Delivery". Only applied
+      to rows of three or more, because a two-cell row is a pair already and
+      reading it this way would marry each label to the next row's.
+    * **A row that is simply a label and its value.**
+    """
+    pairs: list[tuple[str, str]] = []
+    leftover: list[str] = []
+    rows = grid.cells
+    index = 0
+    while index < len(rows):
+        filled = [(column, cell) for column, cell in enumerate(rows[index]) if cell.filled]
+        if not filled:
+            index += 1
+            continue
+
+        split = [_split_labelled(cell.text) for _column, cell in filled]
+        if any(split):
+            for (_column, cell), pair in zip(filled, split):
+                if pair is not None:
+                    pairs.append(pair)
+                else:
+                    leftover.append(cell.text)
+            index += 1
+            continue
+
+        below = rows[index + 1] if index + 1 < len(rows) else None
+        if (
+            len(filled) >= 3
+            and below is not None
+            and all(_is_label(cell) for _column, cell in filled)
+            and all(below[column].filled for column, _cell in filled if column < len(below))
+        ):
+            for column, cell in filled:
+                if column < len(below):
+                    pairs.append((cell.text, below[column].text.strip()))
+            index += 2
+            continue
+
+        if len(filled) == 2:
+            pairs.append((filled[0][1].text, filled[1][1].text))
+        elif len(filled) > 2 and _is_label(filled[-2][1]):
+            # A block of address on the left, a field on the right — the shape
+            # every export invoice uses for its exporter box.
+            pairs.append((filled[-2][1].text, filled[-1][1].text))
+            leftover.extend(cell.text for _column, cell in filled[:-2])
+        else:
+            leftover.extend(cell.text for _column, cell in filled)
+        index += 1
+    return pairs, leftover
+
+
+def _split_labelled(text: str) -> tuple[str, str] | None:
+    """``label: value`` inside one cell, or ``None``."""
+    body = str(text or "").strip()
+    if re.search(r"\d\s*[:：]\s*\d", body):     # a clock, not a label
+        return None
+    match = re.match(r"^([^:：\n]{2,40}?)\s*[:：]\s*(.+)$", body, re.S)
+    if not match:
+        return None
+    label, value = match.group(1).strip(), match.group(2).strip()
+    if not label or not value or not re.search(r"[^\W\d_]", label, re.UNICODE):
+        return None
+    return label, value
+
+
 def read_totals(grids: Sequence[Grid]) -> list[tuple[str, float]]:
     """Every ``label, amount`` a totals table states, in printed order."""
     found: list[tuple[str, float]] = []

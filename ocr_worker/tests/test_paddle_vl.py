@@ -418,3 +418,40 @@ class AvailabilityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HeaderFieldTests(unittest.TestCase):
+    """A name read out of a blob of page text is the weakest evidence there is."""
+
+    def _header(self, html: str) -> dict:
+        import table_probe
+
+        return paddle_vl.to_payload(
+            {"result": table_probe._blocks_from_html(html), "markdown": ""}
+        )["header"]
+
+    def test_a_fragment_is_not_accepted_as_a_supplier(self):
+        # "Authorized Signatory (Signature & Company Stamp)" left the supplier
+        # as "Stamp)" — a column headed "Supplier" holding that is worse than
+        # no column at all.
+        header = self._header("<p>Authorized Signatory (Signature and Company Stamp)</p>")
+        self.assertNotIn("supplier", header)
+
+    def test_a_fragment_is_not_accepted_as_a_customer(self):
+        header = self._header("<p>Buyer (if other than consignee)</p>")
+        self.assertNotIn("client_name", header)
+
+    def test_a_real_name_is_kept(self):
+        header = self._header("<p>Supplier: Northwind Trading Ltd</p>")
+        self.assertEqual(header.get("supplier"), "Northwind Trading Ltd")
+
+    def test_a_postcode_in_an_address_is_not_a_tax_amount(self):
+        payload_totals = paddle_vl._totals_from_lines(
+            ["Exporter M/S HOME DECOR NEAR ALISHAN PALACE SAHARANPUR 247001 INDIA"]
+        )
+        self.assertEqual(payload_totals, {})
+
+    def test_a_labelled_total_line_is_still_read(self):
+        self.assertEqual(
+            paddle_vl._totals_from_lines(["Grand Total 115.00"]).get("grand_total"), 115.0
+        )

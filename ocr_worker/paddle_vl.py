@@ -450,6 +450,20 @@ _CLOCK = re.compile(r"\d\s*[:：]\s*\d")
 _HAS_LETTER = re.compile(r"[^\W\d_]", re.UNICODE)
 
 
+def _is_a_name(value: str) -> bool:
+    """Could this be somebody's name, or is it the tail of a sentence?
+
+    A name does not open with a bracket and does not close one it never opened.
+    Both are what a pattern leaves behind when it matches the middle of a line.
+    """
+    text = str(value or "").strip()
+    if len(text) < 3 or not re.search(r"[^\W\d_]", text, re.UNICODE):
+        return False
+    if text[0] in "([{)]},;:-–—":
+        return False
+    return text.count("(") == text.count(")") and text.count("[") == text.count("]")
+
+
 def _split_pair(text: str) -> tuple[str, str] | None:
     """``label: value`` out of one run of text, or ``None`` if it is not one."""
     body = str(text or "").strip()
@@ -702,34 +716,15 @@ def to_payload(page: dict[str, Any]) -> dict[str, Any]:
     side_fields: list[tuple[str, str]] = []
     unplaced = 0
     for other in other_grids:
-        for row in other.cells:
-            cells = [cell.text.strip() for cell in row if cell.filled]
-            if not cells:
-                continue
-            # A cell that already carries its own "label: value" is a field in
-            # its own right. Invoices print the customer box and the payment box
-            # side by side, and the reader returns them as one two-column table —
-            # so pairing the two cells of a row produced fields like
-            # "اسم: أجهزة كمبيوتر الأسمنت" = "أيام: 15", which is one box's label
-            # against the other box's value.
-            pairs = [_split_pair(text) for text in cells]
-            if any(pairs):
-                for text, pair in zip(cells, pairs):
-                    if pair is not None:
-                        side_fields.append(pair)
-                    else:
-                        lines.append(text)
-                continue
-            if len(cells) == 2:
-                side_fields.append((cells[0], cells[1]))
-            else:
-                # A wider table that is neither the item grid nor a totals box.
-                # Its cells still go into the page text, but they no longer have
-                # columns, so say so: this is the one path by which a reading can
-                # still lose structure, and a silent loss is what made the last
-                # missing price column so hard to explain.
-                lines.extend(cells)
-                unplaced += len(cells)
+        found, leftover = table_shape.field_pairs(other)
+        side_fields.extend(found)
+        # Cells that were neither a field nor part of the item grid still go
+        # into the page text, but they no longer have columns — so say so. This
+        # is the one path by which a reading can still lose structure, and a
+        # silent loss is what made the last missing price column so hard to
+        # explain.
+        lines.extend(leftover)
+        unplaced += len(leftover)
     if unplaced:
         diagnostics.append(f"{unplaced} cells from another table were read as text, not columns")
 
@@ -889,6 +884,17 @@ def to_payload(page: dict[str, Any]) -> dict[str, Any]:
         header.setdefault(field, value)
     for name, amount in line_totals.items():
         totals.setdefault(name, amount)
+
+    # A name read out of a blob of page text is the weakest evidence there is,
+    # and it shows: "Authorized Signatory (Signature & Company Stamp)" left
+    # ``supplier`` as "Stamp)", and "Buyer (if other than consignee)" left the
+    # customer as "(if other than consignee)". A fragment is not a name, and a
+    # column headed "Supplier" holding one is worse than no column at all.
+    for field in ("supplier", "client_name", "shipper", "consignee"):
+        value = str(header.get(field) or "").strip()
+        if value and not _is_a_name(value):
+            header.pop(field, None)
+            diagnostics.append(f"{field} was read as {value!r} and dropped as a fragment")
 
     # The currency is a property of the document, not a column of it. It is
     # popped once above, before the header has been filled from the page text —

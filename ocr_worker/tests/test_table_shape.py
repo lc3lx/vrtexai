@@ -421,3 +421,55 @@ class CurrencyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FieldPairTests(unittest.TestCase):
+    """Boxes of details are laid out three ways, and confusing them pairs one
+    field's name with another field's value."""
+
+    def test_a_row_of_names_over_a_row_of_values(self):
+        # Shipping documents print the questions on one line and the answers on
+        # the next. Read row by row, "Port of Discharge" was recorded as
+        # meaning "Place of Delivery".
+        grid = ts.parse_html_table("""<table>
+        <tr><td>Pre-Carriage By</td><td>Place of receipt</td><td>Country of Origin</td></tr>
+        <tr><td>BY ROAD</td><td>SAHARANPUR</td><td>INDIA</td></tr>
+        </table>""")
+        pairs, leftover = ts.field_pairs(grid)
+        self.assertEqual(pairs, [
+            ("Pre-Carriage By", "BY ROAD"),
+            ("Place of receipt", "SAHARANPUR"),
+            ("Country of Origin", "INDIA"),
+        ])
+        self.assertEqual(leftover, [])
+
+    def test_a_plain_label_and_value_row(self):
+        grid = ts.parse_html_table(
+            "<table><tr><td>TOTAL CARTONS</td><td>48</td></tr>"
+            "<tr><td>TOTAL CBM</td><td>7.650 CBM</td></tr></table>"
+        )
+        pairs, _leftover = ts.field_pairs(grid)
+        self.assertEqual(pairs, [("TOTAL CARTONS", "48"), ("TOTAL CBM", "7.650 CBM")])
+
+    def test_a_cell_carrying_its_own_label_and_value(self):
+        # Two boxes printed side by side come back as one two-column table.
+        grid = ts.parse_html_table(
+            "<table><tr><td>معرف العميل: ش ب ط 001</td><td>نوع: Credit</td></tr></table>"
+        )
+        pairs, _leftover = ts.field_pairs(grid)
+        self.assertEqual(pairs, [("معرف العميل", "ش ب ط 001"), ("نوع", "Credit")])
+
+    def test_a_field_beside_a_block_of_address(self):
+        # The shape every export invoice uses for its exporter box.
+        grid = ts.parse_html_table(
+            "<table><tr><td>M/S HOME DECOR<br>SAHARANPUR 247001<br>INDIA</td>"
+            "<td>Invoice No.</td><td>EXP-03/2026/27</td></tr></table>"
+        )
+        pairs, leftover = ts.field_pairs(grid)
+        self.assertEqual(pairs, [("Invoice No.", "EXP-03/2026/27")])
+        self.assertTrue(any("HOME DECOR" in text for text in leftover))
+
+    def test_a_clock_inside_a_cell_is_not_a_label(self):
+        grid = ts.parse_html_table("<table><tr><td>Time 3:00 PM</td><td>Cash</td></tr></table>")
+        pairs, _leftover = ts.field_pairs(grid)
+        self.assertEqual(pairs, [("Time 3:00 PM", "Cash")])
