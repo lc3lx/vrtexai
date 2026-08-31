@@ -353,6 +353,62 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(stored[self.sheet.title].cell(row, 5).value, 26100)
 
 
+PRACTICE = """<p>Excel Data Entry Practice Exercises PDF</p>
+<table>
+<tr><td></td><td>Date</td><td>Item</td><td>Price</td><td>Unit</td><td>Amount</td><td>Discount</td><td>Net Amount</td><td>Sales Tax</td><td>Total</td></tr>
+<tr><td></td><td>28-Oct-2022</td><td>Pencil</td><td>$0.27</td><td>26</td><td>$7.02</td><td>$0.21</td><td>$6.81</td><td>$0.68</td><td>$7.49</td></tr>
+<tr><td></td><td>28-Oct-2022</td><td>Gel Pen</td><td>$1.40</td><td>6</td><td>$8.40</td><td>$0.42</td><td>$7.98</td><td>$0.80</td><td>$8.78</td></tr>
+<tr><td></td><td>28-Oct-2022</td><td>Calculator</td><td>$7.39</td><td>30</td><td>$221.70</td><td>$11.09</td><td>$210.62</td><td>$21.06</td><td>$231.68</td></tr>
+</table>"""
+
+
+class PracticeSheetTests(unittest.TestCase):
+    """A nine-column ledger, and what a phone viewer made of it."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.payload, cls.document, _blocking, cls.book, cls._dir = build(PRACTICE)
+        cls.sheet = cls.book.worksheets[0]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.book.close()
+        cls._dir.cleanup()
+
+    def heading_row(self) -> int:
+        for row in self.sheet.iter_rows():
+            for cell in row:
+                if cell.value == "Date":
+                    return cell.row
+        raise AssertionError("the table's heading row is missing")
+
+    def test_the_margin_column_does_not_become_a_column(self):
+        # It shifted every heading one place right of its own data.
+        row = self.heading_row()
+        self.assertEqual(self.sheet.cell(row, 1).value, "Date")
+        self.assertEqual(
+            [self.sheet.cell(row, n).value for n in range(1, 10)],
+            ["Date", "Item", "Price", "Unit", "Amount", "Discount",
+             "Net Amount", "Sales Tax", "Total"],
+        )
+
+    def test_every_money_column_carries_the_currency(self):
+        # "Net Amount" and "Total" have no role the resolver knows, and came out
+        # as bare numbers beside four columns that showed dollars.
+        first = self.heading_row() + 1
+        for column in (3, 5, 6, 7, 8, 9):
+            self.assertIn(
+                "$", self.sheet.cell(first, column).number_format,
+                f"column {column} lost its currency",
+            )
+
+    def test_no_column_is_formatted_with_a_hash_placeholder(self):
+        first = self.heading_row() + 1
+        for column in range(1, 10):
+            decimals = self.sheet.cell(first, column).number_format.partition(".")[2]
+            self.assertNotIn("#", decimals)
+
+
 class SplitLineTests(unittest.TestCase):
     def test_a_line_of_two_labelled_fields_becomes_four_cells(self):
         self.assertEqual(

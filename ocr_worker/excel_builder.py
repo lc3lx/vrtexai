@@ -184,6 +184,9 @@ _HEADER_ORDER = (
 # Keys the item objects carry for the builder's own use, never as a column.
 _PRIVATE_ITEM_KEYS = {"review", "notes"}
 
+# A name this product invented because the page gave the column none.
+_AUTOMATIC_NAME = re.compile(r"^column_\d+$", re.I)
+
 
 def words_for(direction: str):
     """A lookup that answers in the language the document is written in."""
@@ -267,12 +270,26 @@ def plan_columns(document: dict[str, Any]) -> list[tuple[str, str, str]]:
         heading = headings.get(role) or say(role, field)
         fields.append((field, heading, role))
 
+    items = list(document.get("items") or [])
     present: list[str] = []
-    for item in document.get("items") or []:
+    for item in items:
         for key in item:
             if key in _PRIVATE_ITEM_KEYS or key.startswith("_") or key in present:
                 continue
             present.append(key)
+
+    # A column with no heading of its own and nothing in it on any row. Pages
+    # are drawn with a margin column and a reader transcribes it as real, so the
+    # table arrived one column wider than it is — every heading shifted right of
+    # its data, under a name like "column_1" that came from nowhere the customer
+    # could see. A column the document named is kept even when it is empty; one
+    # only we named is not a column.
+    def is_phantom(field: str) -> bool:
+        if not _AUTOMATIC_NAME.match(field.strip()):
+            return False
+        return not any(str(item.get(field) or "").strip() for item in items)
+
+    present = [field for field in present if not is_phantom(field)]
     known = {field.casefold(): field for field in present}
 
     # The order the document printed, column by column, taken from the reader's
@@ -335,13 +352,19 @@ _IDENTIFIER_HEADING = re.compile(
 
 # A rate, not an amount. The column is stored as the fraction it means and
 # shown back the way the page printed it.
-PERCENT_FORMAT = "0.##%"
+# Every format here spells its decimals out with zeros rather than with the "#"
+# placeholder. "#,##0.###" is correct Excel and reads beautifully in Excel — and
+# the phone viewer the customer opened the file on rendered it literally, so a
+# column of net amounts came out as "7.###", "8.###", "211.###" in front of
+# their own client. A format that is right everywhere beats one that is elegant
+# in one program.
+PERCENT_FORMAT = "0.00%"
 
 # Excel prints a trailing point for a whole number under "#,##0.###" — a
 # quantity of 10 showed as "10." in the customer's sheet — so a column of whole
 # numbers gets a format with no decimal part at all.
 WHOLE_FORMAT = "#,##0"
-FRACTION_FORMAT = "#,##0.###"
+FRACTION_FORMAT = "#,##0.00"
 
 
 def quantity_format_for(values: Sequence[Any]) -> str:

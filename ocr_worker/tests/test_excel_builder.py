@@ -511,7 +511,26 @@ class FormattingTests(WorkbookCase):
             {"description": "قماش", "qty": 2.5, "unit_price": 10.0, "line_total": 25.0,
              "review": {}, "notes": {}},
         ], totals={}))
-        self.assertEqual(sheet.cell(2, self.column("الكمية")).number_format, "#,##0.###")
+        self.assertEqual(sheet.cell(2, self.column("الكمية")).number_format, "#,##0.00")
+
+    def test_no_number_format_relies_on_a_hash_placeholder(self):
+        """Decimals are spelled with zeros, never with "#".
+
+        "#,##0.###" is correct Excel, and the phone viewer the customer opened
+        the workbook on rendered it literally — a column of net amounts came out
+        reading "7.###", "8.###", "211.###" in front of their own client.
+        """
+        self.build()
+        for sheet in self.book.worksheets:
+            for row in sheet.iter_rows():
+                for cell in row:
+                    if cell.value is None:
+                        continue
+                    decimals = cell.number_format.partition(".")[2]
+                    self.assertNotIn(
+                        "#", decimals,
+                        f"{sheet.title}!{cell.coordinate} uses {cell.number_format}",
+                    )
 
     def test_currency_falls_back_to_a_plain_number_format(self):
         sheet = self.build(document(currency=""))
@@ -755,6 +774,35 @@ class StructureTests(WorkbookCase):
             [cell.value for cell in self.sheet[1]][-6:],
             ["Product ID", "Product Name", "Inward Qty", "Qty In Stock", "Rate", "Amount"],
         )
+
+    def test_a_column_we_named_ourselves_and_nothing_filled_is_dropped(self):
+        """A margin column the reader transcribed as real.
+
+        Pages are drawn with an empty column down the side; a reader sees a
+        column and returns one. The table then arrived a column wider than it
+        is, every heading sitting one place right of its own data, under a name
+        the customer could not find anywhere on their invoice.
+        """
+        self.build(document(
+            columns=["column_1", "الوصف", "الكمية", "سعر الوحدة", "الإجمالي"],
+            column_roles=["other", "description", "qty", "unit_price", "line_total"],
+            items=[{"column_1": "", "description": "قلم", "qty": 2, "unit_price": 15.5,
+                    "line_total": 31.0, "review": {}, "notes": {}}],
+            totals={},
+        ))
+        self.assertNotIn("column_1", self.text_of())
+        self.assertNotIn("column_1", self.text_of(self.document))
+
+    def test_a_column_the_document_named_is_kept_even_when_empty(self):
+        # Dropping that one would be editing the customer's invoice.
+        self.build(document(
+            columns=["الوصف", "ملاحظات", "الكمية", "سعر الوحدة", "الإجمالي"],
+            column_roles=["description", "other", "qty", "unit_price", "line_total"],
+            items=[{"description": "قلم", "ملاحظات": "", "qty": 2, "unit_price": 15.5,
+                    "line_total": 31.0, "review": {}, "notes": {}}],
+            totals={},
+        ))
+        self.assertIn("ملاحظات", self.text_of(self.document))
 
     def test_an_unknown_field_becomes_a_plain_column(self):
         sheet = self.build(document(items=[

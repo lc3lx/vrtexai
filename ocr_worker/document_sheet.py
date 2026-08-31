@@ -305,7 +305,14 @@ def write_document(
                 if field in percent_fields:
                     cell.number_format = builder.PERCENT_FORMAT
                     cell.alignment = builder._number_alignment()
-                elif role in builder.MONEY_ROLES:
+                elif role in builder.MONEY_ROLES or (
+                    # A column of money the role resolver had no name for —
+                    # "Net Amount", "Total" — still shows its currency. Without
+                    # this the page came out with a dollar sign on four of its
+                    # six money columns and bare numbers on the other two.
+                    numeric and role == "other"
+                    and builder._MONEY_HEADING.search(f"{field} {heading}")
+                ):
                     cell.number_format = currency
                     cell.alignment = builder._number_alignment()
                 elif role in builder.QTY_ROLES:
