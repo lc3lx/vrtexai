@@ -78,6 +78,11 @@ class ReadOutcome:
     model: str = "PaddleOCR-VL-0.9B"
     # Set only when the GPU service was skipped, so the job records why.
     fallback_reason: str = ""
+    # What the provider says the page cost it. Kept rather than only logged, so
+    # a model can be priced against the pages this customer actually sends
+    # instead of against a guess — see scripts/compare_readers.py.
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 class AIProvider(abc.ABC):
@@ -479,6 +484,8 @@ class OpenRouterProvider(AIProvider):
             provider=self.name,
             inference_ms=elapsed,
             model=str(body.get("model") or model),
+            prompt_tokens=int(usage.get("prompt_tokens") or 0),
+            completion_tokens=int(usage.get("completion_tokens") or 0),
         )
 
 
